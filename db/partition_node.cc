@@ -27,7 +27,7 @@ void Partition_Node::set_range(uint64_t &startkey,uint64_t &endkey){
     assert(endkey>=startkey);
     //小端存储
     uint8_t *key=reinterpret_cast<uint8_t*>(&startkey);
-    memcpy(node,(char*)key,sizeof(uint64_t));
+    memcpy(node,key,sizeof(uint64_t));
     key=reinterpret_cast<uint8_t*>(&endkey);
-    memcpy(node+8,(char*)key,sizeof(uint64_t));
+    memcpy(node+8,key,sizeof(uint64_t));
 }
