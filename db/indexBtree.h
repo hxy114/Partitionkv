@@ -17,20 +17,18 @@
 
 class Partition_index_layer{
 private:
-    //存储分区 key range 的最小值，指针指向partitionnode
-    tlx::btree_map<unsigned int,char*> *bmap;
+    //存储分区 key range 的最大值，指针指向partitionnode
+    tlx::btree_map<uint64_t,Partition_Node*> *bmap;
 
 public:
-    Partition_index_layer():bmap(nullptr){}
-    ~Partition_index_layer(){
-        if(bmap!=nullptr) delete bmap;
-    }
+    Partition_index_layer();
+    ~Partition_index_layer();
     //根据key的值查找，当前KV应该写在哪个分区内
-    Partition_Node* seek_partition(const unsigned int &key);
+    Partition_Node* seek_partition(const uint64_t &key);
     //添加指向新的分区的索引
-    bool add_new_partition(const char *partition_node);
+    bool add_new_partition(Partition_Node *partition_node);
     //移除指向该分区的索引
-    bool remove_partition(const char *partition_node);
+    bool remove_partition(Partition_Node *partition_node);
 };
 
 

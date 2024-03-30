@@ -6,15 +6,13 @@
 
 class Partition_Node{
 private:
-    char *partiton_node;
+    char *node;
 public:
-    Partition_Node():partiton_node(nullptr){}
-    ~Partition_Node(){
-        if(partiton_node!=nullptr) delete partiton_node;
-    }
+    Partition_Node();
+    ~Partition_Node();
 
     //设置该partition_node的key range
-    void set_range(const unsigned int &startkey,const unsigned int &endkey);
+    void set_range(uint64_t &startkey,uint64_t &endkey);
     //设置指针
     void set_pmtable_pointer();
     void set_immupmtable_pointer();
@@ -23,7 +21,10 @@ public:
 
     //将partition_node持久化到Meta node中
     void persistence_storage();
-
+    //返回end key
+    uint64_t get_key_range_max();
+    //返回start key
+    uint64_t get_key_range_min();
 };
 
 #endif
