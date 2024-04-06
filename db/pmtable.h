@@ -12,7 +12,10 @@ private:
     PMLog *PMLog;
     leveldb::SkipList<uint64_t,char*> *skiplist;
     
-
+public:
+    PMtable();
+    void put();
+    void get();
 
 };
 
