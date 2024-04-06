@@ -17,14 +17,17 @@ Arena::~Arena() {
   }
 }
 
+//当该数据块内的剩余空间不足以分配时，会开辟新的数据块
 char* Arena::AllocateFallback(size_t bytes) {
   if (bytes > kBlockSize / 4) {
+    //按照实际大小需求申请新的数据块
     // Object is more than a quarter of our block size.  Allocate it separately
     // to avoid wasting too much space in leftover bytes.
     char* result = AllocateNewBlock(bytes);
     return result;
   }
 
+  //申请固定大小的数据块
   // We waste the remaining space in the current block.
   alloc_ptr_ = AllocateNewBlock(kBlockSize);
   alloc_bytes_remaining_ = kBlockSize;
@@ -35,6 +38,7 @@ char* Arena::AllocateFallback(size_t bytes) {
   return result;
 }
 
+//申请字节对其的空间
 char* Arena::AllocateAligned(size_t bytes) {
   const int align = (sizeof(void*) > 8) ? sizeof(void*) : 8;
   static_assert((align & (align - 1)) == 0,
@@ -55,6 +59,7 @@ char* Arena::AllocateAligned(size_t bytes) {
   return result;
 }
 
+//申请新的数据块，并将数据块记录在容器中，以便于空间管理
 char* Arena::AllocateNewBlock(size_t block_bytes) {
   char* result = new char[block_bytes];
   blocks_.push_back(result);

@@ -7,15 +7,19 @@
 #include<iostream>
 #include"pmtable.h"
 #include"meta_node.h"
+#include"arena.h"
+
 class Partition_Node{
 private:
-    char *node;
+    //存储分区内的信息，如key range并记录指针
+    char* const node;
+    //内存管理
+    leveldb::Arena* const arena;
 public:
-    Partition_Node();
-    ~Partition_Node();
-
+    Partition_Node(leveldb::Arena *arena);
     //设置该partition_node的key range
     void set_range(uint64_t &startkey,uint64_t &endkey);
+
     //设置指针，指针为null时，赋值为0
     void set_pmtable_pointer(const PMtable *pointer);
     void set_immupmtable_pointer(const PMtable *pointer);

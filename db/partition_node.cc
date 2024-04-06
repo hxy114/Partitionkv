@@ -2,15 +2,10 @@
 #include<iostream>
 #include <string.h>
 #include <cassert>
-Partition_Node::Partition_Node(){
-    this->node=new char[48];
+Partition_Node::Partition_Node(leveldb::Arena *arena):arena(arena),node(arena->AllocateAligned(48)){
+    //将node内的数据全部置为0
     memset(node,0,48);
 }
-
-Partition_Node::~Partition_Node(){
-    delete []node;
-}
-
 
 std::pair<uint64_t,uint64_t> Partition_Node::get_key_range(){
     uint8_t *startkey=reinterpret_cast<uint8_t*>(node);
