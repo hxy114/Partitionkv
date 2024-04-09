@@ -127,12 +127,32 @@ class MemTableInserter : public WriteBatch::Handler {
     sequence_++;
   }
 };
+class PartitionInserter : public WriteBatch::Handler {
+ public:
+  SequenceNumber sequence_;
+  PartitionIndexLayer* partitionIndexLayer_;
+
+  void Put(const Slice& key, const Slice& value) override {
+    partitionIndexLayer_->Add(sequence_, kTypeValue, key, value);
+    sequence_++;
+  }
+  void Delete(const Slice& key) override {
+    partitionIndexLayer_->Add(sequence_, kTypeDeletion, key, Slice());
+    sequence_++;
+  }
+};
 }  // namespace
 
 Status WriteBatchInternal::InsertInto(const WriteBatch* b, MemTable* memtable) {
   MemTableInserter inserter;
   inserter.sequence_ = WriteBatchInternal::Sequence(b);
   inserter.mem_ = memtable;
+  return b->Iterate(&inserter);
+}
+Status WriteBatchInternal::InsertInto(const WriteBatch* b, PartitionIndexLayer* partitionIndexLayer) {
+  PartitionInserter inserter;
+  inserter.sequence_ = WriteBatchInternal::Sequence(b);
+  inserter.partitionIndexLayer_ = partitionIndexLayer;
   return b->Iterate(&inserter);
 }
 

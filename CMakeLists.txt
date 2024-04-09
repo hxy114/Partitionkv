@@ -190,7 +190,16 @@ target_sources(leveldb
     "util/options.cc"
     "util/random.h"
     "util/status.cc"
-
+    "util/nvm_arena.h"
+    "util/nvm_arena.cc"
+    "util/nvm_module.h"
+    "util/nvm_module.cc"
+    "db/indexBtree.h"
+    "db/indexBtree.cc"
+    "db/partition_node.h"
+    "db/partition_node.cc"
+    "db/pmtable.h"
+    "db/pmtable.cc"
   # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
   $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
     "${LEVELDB_PUBLIC_INCLUDE_DIR}/c.h"
@@ -267,7 +276,7 @@ if(HAVE_CLANG_THREAD_SAFETY)
     PUBLIC
       -Werror -Wthread-safety)
 endif(HAVE_CLANG_THREAD_SAFETY)
-
+target_link_libraries(leveldb pmem)
 if(HAVE_CRC32C)
   target_link_libraries(leveldb crc32c)
 endif(HAVE_CRC32C)

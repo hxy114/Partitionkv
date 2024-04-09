@@ -196,7 +196,7 @@ class LEVELDB_EXPORT Env {
   // I.e., the caller may not assume that background work items are
   // serialized.
   virtual void Schedule(void (*function)(void* arg), void* arg) = 0;
-
+  virtual void ScheduleL0(void (*function)(void* arg), void* arg) = 0;
   // Start a new thread, invoking "function(arg)" within the new thread.
   // When "function(arg)" returns, the thread will be destroyed.
   virtual void StartThread(void (*function)(void* arg), void* arg) = 0;
@@ -383,6 +383,9 @@ class LEVELDB_EXPORT EnvWrapper : public Env {
   Status UnlockFile(FileLock* l) override { return target_->UnlockFile(l); }
   void Schedule(void (*f)(void*), void* a) override {
     return target_->Schedule(f, a);
+  }
+  void ScheduleL0(void (*f)(void*), void* a) override {
+    return target_->ScheduleL0(f, a);
   }
   void StartThread(void (*f)(void*), void* a) override {
     return target_->StartThread(f, a);

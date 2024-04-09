@@ -35,7 +35,7 @@
 #include "port/thread_annotations.h"
 #include "util/env_posix_test_helper.h"
 #include "util/posix_logger.h"
-
+#include "util/nvm_module.h"
 namespace leveldb {
 
 namespace {
@@ -690,6 +690,8 @@ class PosixEnv : public Env {
 
   void Schedule(void (*background_work_function)(void* background_work_arg),
                 void* background_work_arg) override;
+  void ScheduleL0(void (*background_work_function)(void* background_work_arg),
+                void* background_work_arg) override;
 
   void StartThread(void (*thread_main)(void* thread_main_arg),
                    void* thread_main_arg) override {
@@ -746,9 +748,12 @@ class PosixEnv : public Env {
 
  private:
   void BackgroundThreadMain();
-
+  void BackgroundThreadMainL0();
   static void BackgroundThreadEntryPoint(PosixEnv* env) {
     env->BackgroundThreadMain();
+  }
+  static void BackgroundThreadEntryPointL0(PosixEnv* env) {
+    env->BackgroundThreadMainL0();
   }
 
   // Stores the work item data in a Schedule() call.
@@ -771,6 +776,13 @@ class PosixEnv : public Env {
 
   std::queue<BackgroundWorkItem> background_work_queue_
       GUARDED_BY(background_work_mutex_);
+
+  port::Mutex background_work_mutex_L0_;
+  port::CondVar background_work_cv_L0_ GUARDED_BY(background_work_mutex_L0_);
+  bool started_background_thread_L0_ GUARDED_BY(background_work_mutex_L0_);
+
+  std::queue<BackgroundWorkItem> background_work_queue_L0_
+      GUARDED_BY(background_work_mutex_L0_);
 
   PosixLockTable locks_;  // Thread-safe.
   Limiter mmap_limiter_;  // Thread-safe.
@@ -807,6 +819,7 @@ int MaxOpenFiles() {
 
 PosixEnv::PosixEnv()
     : background_work_cv_(&background_work_mutex_),
+      background_work_cv_L0_(&background_work_mutex_L0_),
       started_background_thread_(false),
       mmap_limiter_(MaxMmaps()),
       fd_limiter_(MaxOpenFiles()) {}
@@ -830,6 +843,47 @@ void PosixEnv::Schedule(
 
   background_work_queue_.emplace(background_work_function, background_work_arg);
   background_work_mutex_.Unlock();
+}
+void PosixEnv::ScheduleL0(
+    void (*background_work_function)(void* background_work_arg),
+    void* background_work_arg) {
+  background_work_mutex_L0_.Lock();
+
+  // Start the background thread, if we haven't done so already.
+  if (!started_background_thread_L0_) {
+    started_background_thread_L0_ = true;
+    for(int i=0;i<L0_THREAD_NUMBER;i++){
+      std::thread background_thread(PosixEnv::BackgroundThreadEntryPointL0, this);
+      background_thread.detach();
+    }
+
+  }
+
+  // If the queue is empty, the background thread may be waiting for work.
+  if (background_work_queue_L0_.empty()) {
+    background_work_cv_L0_.Signal();
+  }
+
+  background_work_queue_L0_.emplace(background_work_function, background_work_arg);
+  background_work_mutex_L0_.Unlock();
+}
+void PosixEnv::BackgroundThreadMainL0() {
+  while (true) {
+    background_work_mutex_L0_.Lock();
+
+    // Wait until there is work to be done.
+    while (background_work_queue_L0_.empty()) {
+      background_work_cv_L0_.Wait();
+    }
+
+    assert(!background_work_queue_L0_.empty());
+    auto background_work_function = background_work_queue_L0_.front().function;
+    void* background_work_arg = background_work_queue_L0_.front().arg;
+    background_work_queue_L0_.pop();
+
+    background_work_mutex_L0_.Unlock();
+    background_work_function(background_work_arg);
+  }
 }
 
 void PosixEnv::BackgroundThreadMain() {

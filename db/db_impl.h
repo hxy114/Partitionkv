@@ -9,6 +9,8 @@
 #include <deque>
 #include <set>
 #include <string>
+#include <map>
+#include <vector>
 
 #include "db/dbformat.h"
 #include "db/log_writer.h"
@@ -17,6 +19,8 @@
 #include "leveldb/env.h"
 #include "port/port.h"
 #include "port/thread_annotations.h"
+#include "indexBtree.h"
+#include "util/nvm_module.h"
 
 namespace leveldb {
 
@@ -75,7 +79,8 @@ class DBImpl : public DB {
   friend class DB;
   struct CompactionState;
   struct Writer;
-
+  friend class PartitionIndexLayer;
+  friend class PartitionNode;
   // Information for a manual compaction
   struct ManualCompaction {
     int level;
@@ -112,6 +117,8 @@ class DBImpl : public DB {
   // be made to the descriptor are added to *edit.
   Status Recover(VersionEdit* edit, bool* save_manifest)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  Status RecoverPartition(VersionEdit* edit, bool* save_manifest)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   void MaybeIgnoreError(Status* s) const;
 
@@ -137,20 +144,28 @@ class DBImpl : public DB {
 
   void RecordBackgroundError(const Status& s);
 
+  void MaybeScheduleCompactionL0() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  static void BGWorkL0(void* db);
+  void BackgroundCallL0();
   static void BGWork(void* db);
   void BackgroundCall();
   void BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+
+  void BackgroundCompactionL0() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void CleanupCompaction(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   Status DoCompactionWork(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
+  Status DoCompactionWorkL0(CompactionState* compact)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   Status OpenCompactionOutputFile(CompactionState* compact);
   Status FinishCompactionOutputFile(CompactionState* compact, Iterator* input);
+  Status FinishCompactionOutputFileL0(CompactionState* compact,Iterator* input);
   Status InstallCompactionResults(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-
+  Status InstallCompactionResultsL0(CompactionState* compact);
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   const Comparator* user_comparator() const {
     return internal_comparator_.user_comparator();
   }
@@ -163,6 +178,7 @@ class DBImpl : public DB {
   const bool owns_info_log_;
   const bool owns_cache_;
   const std::string dbname_;
+  bool use_partition_;
 
   // table_cache_ provides its own synchronization
   TableCache* const table_cache_;
@@ -174,6 +190,8 @@ class DBImpl : public DB {
   port::Mutex mutex_;
   std::atomic<bool> shutting_down_;
   port::CondVar background_work_finished_signal_ GUARDED_BY(mutex_);
+  port::CondVar background_work_finished_signal_L0_ GUARDED_BY(mutex_);
+  PartitionIndexLayer *partitionIndexLayer_;
   MemTable* mem_;
   MemTable* imm_ GUARDED_BY(mutex_);  // Memtable being compacted
   std::atomic<bool> has_imm_;         // So bg thread can detect non-null imm_
@@ -194,7 +212,7 @@ class DBImpl : public DB {
 
   // Has a background compaction been scheduled or is running?
   bool background_compaction_scheduled_ GUARDED_BY(mutex_);
-
+  int background_compaction_scheduled_L0_ GUARDED_BY(mutex_);
   ManualCompaction* manual_compaction_ GUARDED_BY(mutex_);
 
   VersionSet* const versions_ GUARDED_BY(mutex_);
@@ -203,6 +221,13 @@ class DBImpl : public DB {
   Status bg_error_ GUARDED_BY(mutex_);
 
   CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
+
+  PmtableQueue high_queue_ GUARDED_BY(mutex_);
+  PmtableQueue low_queue_ GUARDED_BY(mutex_);
+
+  std::vector<std::pair<std::string,std::string>>L0_range_;
+  std::vector<std::pair<std::string,std::string>>L1_range_;
+  std::vector<std::pair<std::string,std::string>>L2_range_;
 };
 
 // Sanitize db options.  The caller should delete result.info_log if
