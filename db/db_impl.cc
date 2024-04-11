@@ -155,7 +155,7 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       seed_(0),
       tmp_batch_(new WriteBatch),
       background_compaction_scheduled_(false),
-      background_compaction_scheduled_L0_(L0_THREAD_NUMBER),
+      background_compaction_scheduled_L0_(0),
       manual_compaction_(nullptr),
       versions_(new VersionSet(dbname_, &options_, table_cache_,
                                &internal_comparator_)) ,
@@ -824,6 +824,7 @@ void DBImpl::BackgroundCallL0() {
   // Previous compaction may have produced too many files in a level,
   // so reschedule another compaction if needed.
   MaybeScheduleCompactionL0();
+  MaybeScheduleCompaction();
   background_work_finished_signal_L0_.SignalAll();
 }
 void DBImpl::BackgroundCall() {
@@ -878,21 +879,28 @@ void DBImpl::BackgroundCompactionL0(){
       if(!is_cover){
         std::vector<FileMetaData*>input;
         versions_->current()->GetOverlappingInputs(1,startey,endkey,&input);
-        AddBoundaryInputs(versions_->icmp_, versions_->current()->files_[1], &input);
 
-        is_cover=CoverRange(input[0]->smallest.user_key(),input.back()->largest.user_key(),L0_range_);
+        if(!input.empty()){
+          AddBoundaryInputs(versions_->icmp_, versions_->current()->files_[1], &input);
+          is_cover=CoverRange(input[0]->smallest.user_key(),input.back()->largest.user_key(),L1_range_);
+        }
+
         // Get entire range covered by compaction
         if(!is_cover){
           high_queue_.RemovePmtable(immupmtableptr);
-          //immupmtableptr->Ref();
           immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
           L0_range_.emplace_back(std::make_pair(startey,endkey));
-          L1_range_.emplace_back(std::make_pair(input[0]->smallest.user_key().ToString(),input.back()->largest.user_key().ToString()));
-
+          if(!input.empty()) {
+            L1_range_.emplace_back(
+                std::make_pair(input[0]->smallest.user_key().ToString(),
+                               input.back()->largest.user_key().ToString()));
+          }
           c = versions_->PickCompactionL0(immupmtableptr,input);
+          break;
         }
       }
     }
+    high=high->next;
 
   }
   if(c== nullptr){
@@ -906,22 +914,28 @@ void DBImpl::BackgroundCompactionL0(){
         if(!is_cover){
           std::vector<FileMetaData*>input;
           versions_->current()->GetOverlappingInputs(1,startey,endkey,&input);
-          AddBoundaryInputs(versions_->icmp_, versions_->current()->files_[1], &input);
+          if(!input.empty()){
+            AddBoundaryInputs(versions_->icmp_, versions_->current()->files_[1], &input);
+            is_cover=CoverRange(input[0]->smallest.user_key(),input.back()->largest.user_key(),L1_range_);
+          }
 
-          is_cover=CoverRange(input[0]->smallest.user_key(),input.back()->largest.user_key(),L0_range_);
           // Get entire range covered by compaction
           if(!is_cover){
-            high_queue_.RemovePmtable(immupmtableptr);
-            //immupmtableptr->Ref();
+            low_queue_.RemovePmtable(immupmtableptr);
             immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
             L0_range_.emplace_back(std::make_pair(startey,endkey));
-            L1_range_.emplace_back(std::make_pair(input[0]->smallest.user_key().ToString(),input.back()->largest.user_key().ToString()));
-
+            if(!input.empty()) {
+              L1_range_.emplace_back(
+                  std::make_pair(input[0]->smallest.user_key().ToString(),
+                                 input.back()->largest.user_key().ToString()));
+            }
             c = versions_->PickCompactionL0(immupmtableptr,input);
             immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
+            break;
           }
         }
       }
+      low=low->next;
 
     }
 
@@ -1217,7 +1231,7 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
       compact->compactionL0->num_input_filesL1(),
       compact->compactionL0->level() + 1);
 
-  assert(versions_->NumLevelFiles(compact->compactionL0->level()) > 0);
+  //assert(versions_->NumLevelFiles(compact->compactionL0->level()) > 0);
   assert(compact->builder == nullptr);
   assert(compact->outfile == nullptr);
   if (snapshots_.empty()) {
@@ -1369,7 +1383,13 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
       }
       right_father->FLush();
     }
+      L0_range_.erase(std::remove_if(L0_range_.begin(), L0_range_.end(), [immu](std::pair<std::string,std::string>x) {return x.first ==immu->GetMinKey() &&x.second==immu->GetMaxKey() ; }), L0_range_.end());
+      if(compact->compactionL0->num_input_filesL1()!=0){
+      L1_range_.erase(std::remove_if(L1_range_.begin(), L1_range_.end(), [compact](std::pair<std::string,std::string>x) {return x.first ==compact->compactionL0->inputL1(0)->smallest.user_key() &&x.second==compact->compactionL0->inputL1(compact->compactionL0->num_input_filesL1()-1)->largest.user_key() ; }), L1_range_.end());
+
+      }
   }
+
   if (!status.ok()) {
     RecordBackgroundError(status);
   }
@@ -2201,6 +2221,7 @@ Status DestroyDB(const std::string& dbname, const Options& options) {
     env->UnlockFile(lock);  // Ignore error since state is already gone
     env->RemoveFile(lockname);
     env->RemoveDir(dbname);  // Ignore error in case dir contains other files
+    env->RemoveDir(PM_FILE_NAME);
   }
   return result;
 }

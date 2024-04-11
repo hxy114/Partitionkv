@@ -228,6 +228,7 @@ class DBImpl : public DB {
   std::vector<std::pair<std::string,std::string>>L0_range_;
   std::vector<std::pair<std::string,std::string>>L1_range_;
   std::vector<std::pair<std::string,std::string>>L2_range_;
+
 };
 
 // Sanitize db options.  The caller should delete result.info_log if

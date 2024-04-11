@@ -417,7 +417,7 @@ class CompactionL0 {
   int num_input_filesL1() const { return inputs_.size(); }
   int num_input_filesL0() const { return 1; }
   // Return the ith input file at "level()+which" ("which" must be 0 or 1).
-  FileMetaData* inputL1( int i) const { return inputs_[i]; }
+  FileMetaData* inputL1(int i) const { return inputs_[i]; }
   PmTable* inputL0( ) const { return pmTable_; }
   // Maximum size of files to build during this compaction.
   uint64_t MaxOutputFileSize() const { return max_output_file_size_; }

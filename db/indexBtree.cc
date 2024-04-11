@@ -95,7 +95,7 @@ PartitionNode * PartitionIndexLayer::getAceeptNode(Version *current,PartitionNod
     }
     next++;
     if(next!=bmap->end()){
-      rightPartitionNode=pre->second;
+      rightPartitionNode=next->second;
     }
 
     if(leftPartitionNode&&leftPartitionNode->other_immuPmtable== nullptr){
@@ -128,6 +128,9 @@ void PartitionIndexLayer::merge(PartitionNode *partitionNode){
       mutex_.Unlock();
       PartitionNode *acceptPartitionNode=getAceeptNode(current,partitionNode);
       if(acceptPartitionNode!= nullptr){
+        Log(dbImpl_->options_.info_log, "mergeing partitionNode:start:%s,end%s.acceptnode:start:%s,end:%s",
+            partitionNode->start_key.c_str(), partitionNode->end_key.c_str(),
+            acceptPartitionNode->start_key.c_str(),acceptPartitionNode->end_key.c_str());
         std::string end_key=partitionNode->end_key;
         std::string accept_end_key=acceptPartitionNode->end_key;
         std::string new_start_key=std::min(partitionNode->start_key,acceptPartitionNode->start_key);
@@ -155,6 +158,8 @@ void PartitionIndexLayer::merge(PartitionNode *partitionNode){
         acceptPartitionNode->FLush();
         current->Unref();
         mutex_.Unlock();
+        Log(dbImpl_->options_.info_log, "mergeed new partition:start:%s ,end:%s",
+            acceptPartitionNode->start_key.c_str(),acceptPartitionNode->end_key.c_str());
       }else{
         mutex_.Lock();
         current->Unref();
@@ -165,6 +170,8 @@ void PartitionIndexLayer::merge(PartitionNode *partitionNode){
 }
 void PartitionIndexLayer::split(PartitionNode *partitionNode){
     if(capacity_<MAX_PARTITION){
+      Log(dbImpl_->options_.info_log, "spliting partitionNode:start:%s,end%s",
+          partitionNode->start_key.c_str(), partitionNode->end_key.c_str());
       mutex_.Lock();
       assert(partitionNode->other_immuPmtable== nullptr&&partitionNode->immuPmtable== nullptr);
       Version *current=versions_->current();
@@ -205,7 +212,9 @@ void PartitionIndexLayer::split(PartitionNode *partitionNode){
 
         partitionNode->FLush();
         newPartitionNode->FLush();
-
+        Log(dbImpl_->options_.info_log, "splited partitionNode1:start:%s,end%s.partitionNode2:start:%s,end:%s",
+            partitionNode->start_key.c_str(), partitionNode->end_key.c_str(),
+            newPartitionNode->start_key.c_str(),newPartitionNode->end_key.c_str());
       }else{
         exit(2);
       }

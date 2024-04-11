@@ -23,7 +23,11 @@ PartitionNode::PartitionNode(const std::string &start_key1,
               background_work_finished_signal_L0_(background_work_finished_signal_L0),
               high_queue_(high_queue),
               low_queue_(low_queue),
-              dbImpl_(dbImpl){
+              dbImpl_(dbImpl),
+              refs_(0),
+              immuPmtable(nullptr),
+              other_immuPmtable(nullptr),
+              pmtable(nullptr){
   init(start_key1,end_key1);
 }
 
@@ -136,7 +140,9 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
     if(is_force){
       mutex_.Lock();
       while(immuPmtable!= nullptr){
-          background_work_finished_signal_L0_.Wait();
+        //std::cout<<"插入睡眠"<<std::endl;
+        background_work_finished_signal_L0_.Wait();
+        //std::cout<<"插入睡醒"<<std::endl;
       }
       PmTable *immupmTable=pmtable;
       set_immuPmtable(immupmTable);
@@ -154,12 +160,14 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
     }else{
       mutex_.Lock();
       while(immuPmtable!= nullptr){
-          background_work_finished_signal_L0_.Wait();
+        //std::cout<<"插入睡眠"<<std::endl;
+        background_work_finished_signal_L0_.Wait();
+        //std::cout<<"插入睡醒"<<std::endl;
       }
 
       Status status=sucess;
       auto current=versions_->current();
-      bool has_other_immupmtable= immuPmtable != nullptr;
+      bool has_other_immupmtable= other_immuPmtable != nullptr;
       current->Ref();
       mutex_.Unlock();
 
@@ -206,6 +214,10 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
               return sucess;
             }
           }
+          mutex_.Lock();
+          current->Unref();
+          mutex_.Unlock();
+          return status;
 
       }else{
           mutex_.Lock();
@@ -233,6 +245,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
     if(immuPmtable!= nullptr&&immuPmtable->GetPmTableStatus()==PmTable::PmTable_Status::IN_LOW_QUQUE){
       low_queue_.RemovePmtable(immuPmtable);
       high_queue_.InsertPmtable(immuPmtable);
+      immuPmtable->SetPmTableStatus(PmTable::IN_HIGH_QUEUE);
     }
     mutex_.Unlock();
   }

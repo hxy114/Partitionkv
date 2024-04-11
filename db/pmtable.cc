@@ -231,7 +231,7 @@ void PmtableQueue::RemovePmtable(PmTable *pmTable) {
     delete node;
   }
 }
-size_t PmtableQueue::capacity(){
+size_t PmtableQueue:: capacity(){
   return mp_.size();
 }
 }  // namespace leveldb

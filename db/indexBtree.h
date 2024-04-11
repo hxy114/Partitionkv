@@ -31,6 +31,7 @@ class PartitionIndexLayer{
   PmtableQueue &low_queue_;
   uint64_t  capacity_;
   DBImpl *dbImpl_;
+
   void merge(PartitionNode *partitionNode);
   void split(PartitionNode *partitionNode);
   PartitionNode * getAceeptNode(Version *current,PartitionNode *partitionNode);

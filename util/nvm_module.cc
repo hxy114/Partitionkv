@@ -10,10 +10,10 @@ const size_t PM_SIZE=10*1024*1024*1024UL;
 const size_t PM_META_NODE_SIZE=64;//pmlog 大小
 const size_t PM_LOG_HEAD_SIZE=64;//pm log大小
 const size_t PM_LOG_SIZE=128*1024*1024UL;
-const size_t PERSIST_SIZE=4*1024;//非强制刷写大小
-const size_t PM_META_NODE_NUMBER=25;//TODO
+const size_t PERSIST_SIZE=4*1024*1024;//非强制刷写大小
+const size_t PM_META_NODE_NUMBER=30;//TODO
 const size_t PM_LOG_NUMBER=75;//TODO
-const char * PM_FILE_NAME="/pmem/pm_log";
+const char * PM_FILE_NAME="/mnt/pmemdir/pm_log";
 const uint32_t META_NODE_MAGIC=0x0100;
 const uint32_t PM_LOG_MAGIC=0x0101;
 const uint32_t INVALID=0x00;
@@ -22,24 +22,24 @@ const std::string MIN_KEY="";
 const std::string MAX_KEY="\xFF\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff";
 
 
-const uint64_t PRE_SPLIT=8;//TODO
-const uint64_t SPLIT=10;//TODO
+const uint64_t PRE_SPLIT=5;//TODO
+const uint64_t SPLIT=7;//TODO
 
-const uint64_t PRE_MERGE=4;//TODO
-const uint64_t MERGE=2;//TODO
+const uint64_t PRE_MERGE=1;//TODO
+const uint64_t MERGE=1;//TODO
 
 const uint64_t K=7;//TODO 记录K次覆盖记录
 const uint64_t PRE_SPLIT_NUMBER=3;//TODO
 const uint64_t PRE_MERGE_NUMBER=4;//TODO
 
 
-const uint64_t MIN_PARTITION=1;
-const uint64_t MAX_PARTITION=20;
+const uint64_t MIN_PARTITION=5;
+const uint64_t MAX_PARTITION=30;
 
 
 const bool IS_FLUSH=true;
 
-const uint64_t L0_THREAD_NUMBER=2;
+const uint64_t L0_THREAD_NUMBER=3;
 
 MetaNode * NvmManager::get_meta_node() {
   mutex_.Lock();

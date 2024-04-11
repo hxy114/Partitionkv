@@ -21,7 +21,7 @@ class PartitionNode{
   std::string start_key;
   std::string end_key;
   PmTable *pmtable;
-  bool set_high_queue_;//把immupmtable放到高优先级队列
+  //bool set_high_queue_;//把immupmtable放到高优先级队列
   PmTable *immuPmtable;
   //std::atomic<bool> has_immuPmtable_;
   PmTable *other_immuPmtable;

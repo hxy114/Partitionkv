@@ -44,7 +44,7 @@
 //      stats       -- Print DB stats
 //      sstables    -- Print sstable info
 //      heapprofile -- Dump a heap profile (if supported by this port)
-static const char* FLAGS_benchmarks =
+/*static const char* FLAGS_benchmarks =
     "fillseq,"
     "fillsync,"
     "fillrandom,"
@@ -62,10 +62,14 @@ static const char* FLAGS_benchmarks =
     "snappycomp,"
     "snappyuncomp,"
     "zstdcomp,"
-    "zstduncomp,";
+    "zstduncomp,";*/
+static const char* FLAGS_benchmarks =
+    "fillrandom,"
+    "readrandom,";
+
 
 // Number of key/values to place in database
-static int FLAGS_num = 1000000;
+static int FLAGS_num = 50000000;
 
 // Number of read operations to do.  If negative, do FLAGS_num reads.
 static int FLAGS_reads = -1;
@@ -74,7 +78,7 @@ static int FLAGS_reads = -1;
 static int FLAGS_threads = 1;
 
 // Size of each value
-static int FLAGS_value_size = 100;
+static int FLAGS_value_size = 1000;
 
 // Arrange to generate values that shrink to this fraction of
 // their original size after compression
@@ -100,7 +104,7 @@ static int FLAGS_block_size = 0;
 
 // Number of bytes to use as a cache of uncompressed data.
 // Negative means use default settings.
-static int FLAGS_cache_size = -1;
+static int FLAGS_cache_size = 8 << 20;
 
 // Maximum number of files to keep open at the same time (use default if == 0)
 static int FLAGS_open_files = 0;
