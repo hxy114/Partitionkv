@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
+#define gettid() syscall(__NR_gettid)
 
 #include "db/builder.h"
 #include "db/db_iter.h"
