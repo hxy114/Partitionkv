@@ -16,6 +16,7 @@ class PartitionNode{
     sucess,
     split,
     merge,
+    noop,
   };
   char *base_;
   std::string start_key;
@@ -36,10 +37,13 @@ class PartitionNode{
   size_t index_=0;
 
   port::CondVar &background_work_finished_signal_L0_;
+  PmtableQueue &top_queue_;
   PmtableQueue &high_queue_;
   PmtableQueue &low_queue_;
   DBImpl *dbImpl_;
+  size_t immu_number_;
  public:
+  void reset_cover();
   Status needSplitOrMerge();
   void init(const std::string &startkey,const std::string &endkey);
   void FLush();
@@ -49,6 +53,7 @@ class PartitionNode{
                 port::Mutex &mutex,
                 port::CondVar &background_work_finished_signal,
                 InternalKeyComparator &internal_comparator,
+                PmtableQueue &top_queue,
                 PmtableQueue &high_queue,
                 PmtableQueue &low_queue,
                 DBImpl *dbImpl);
@@ -58,8 +63,11 @@ class PartitionNode{
   void set_range( std::string &startkey,std::string &endkey);
   //设置指针
   void set_other_immupmtable(PmTable *otherImmuPmtable);
-  void set_immuPmtable(PmTable *immuPmtable);
+  void add_immuPmtable(PmTable *immuPmtable);
+  void set_immuPmtable(PmTable *immuPmtable1);
   void set_pmtable(PmTable *pmTable);
+  void reset_other_immupmtable(int n,PmTable *pm);
+  void reset_immuPmtable(int n,PmTable *pm);
   void reset_other_immupmtable();
   void reset_immuPmtable();
   void reset_pmtable();
@@ -82,7 +90,7 @@ class PartitionNode{
     }
   }
    Status Add(SequenceNumber s, ValueType type, const Slice& key,
-           const Slice& value,bool is_force);//当is_force=true时候，不进行split和merge
+           const Slice& value,bool is_force,size_t  capacity);//当is_force=true时候，不进行split和merge
 };
 }
 

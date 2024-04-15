@@ -29,6 +29,9 @@ class PmTable {
     IN_RECEVIE,
     IN_LOW_QUQUE,
     IN_HIGH_QUEUE,
+    IN_TOP_QUEUE,
+    IN_FOLLOW,
+    IN_HEAD,
     IN_COMPACTIONING,
     IN_COMPACTIONED,
   };
@@ -36,7 +39,7 @@ class PmTable {
   friend class PartitionNode;
   // MemTables are reference counted.  The initial reference count
   // is zero and the caller must call Ref() at least once.
-  explicit PmTable(const InternalKeyComparator& comparator,PartitionNode *partitionNode);
+  explicit PmTable(const InternalKeyComparator& comparator,PartitionNode *partitionNode,PmLogHead *pmLogHead);
   void init(PartitionNode *partitionNode);
   PmTable(const PmTable&) = delete;
   PmTable& operator=(const PmTable&) = delete;
@@ -79,14 +82,19 @@ class PmTable {
   bool Get(const LookupKey& key, std::string* value, Status* s);
   void SetRole(Role role);
   Role GetRole();
+  void SetLeftFather(PartitionNode *left_father);
+  void SetRightFather(PartitionNode *right_father);
   void SetPmTableStatus(PmTable_Status pmTableStatus);
   PmTable_Status GetPmTableStatus();
   PartitionNode * GetLeftFather();
   PartitionNode * GetRightFather();
+  void SetNext(PmTable *pmTable);
  private:
   friend class PmTableIterator;
   friend class PmTableBackwardIterator;
-
+  friend class DBImpl;
+  friend class VersionSet;
+  friend class Version;
   struct KeyComparator {
     const InternalKeyComparator comparator;
     explicit KeyComparator(const InternalKeyComparator& c) : comparator(c) {}
@@ -109,6 +117,7 @@ class PmTable {
   PartitionNode * right_father_;
   std::string min_key_;
   std::string max_key_;
+  PmTable *next_;
 
 };
 
@@ -131,6 +140,7 @@ class PmtableQueue{
  private:
   std::unordered_map<PmTable*,ListNode*>mp_;
   ListNode *head_;
+
 
 };
 }  // namespace leveldb

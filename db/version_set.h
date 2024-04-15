@@ -242,7 +242,7 @@ class VersionSet {
   // Otherwise returns a pointer to a heap-allocated object that
   // describes the compaction.  Caller should delete the result.
   Compaction* PickCompaction();
-  CompactionL0* PickCompactionL0(PmTable *pmtable,std::vector<FileMetaData*>&input);
+  CompactionL0* PickCompactionL0(PmTable *pmtable,std::vector<FileMetaData*>&input,int n,Slice &all_start,Slice &all_limit,Version *current);
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns nullptr if there is nothing in that
   // level that overlaps the specified range.  Caller should delete
@@ -415,10 +415,12 @@ class CompactionL0 {
 
   // "which" must be either 0 or 1
   int num_input_filesL1() const { return inputs_.size(); }
-  int num_input_filesL0() const { return 1; }
+  int num_input_filesL0() const { return pmTable_list_size_; }
   // Return the ith input file at "level()+which" ("which" must be 0 or 1).
   FileMetaData* inputL1(int i) const { return inputs_[i]; }
   PmTable* inputL0( ) const { return pmTable_; }
+  std::string GetMaxKey();
+  std::string GetMinKey();
   // Maximum size of files to build during this compaction.
   uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
 
@@ -455,6 +457,7 @@ class CompactionL0 {
 
   // Each compaction reads inputs from "level_" and "level_+1"
   PmTable *pmTable_;//L0
+  int pmTable_list_size_;
   std::vector<FileMetaData*> inputs_;  // The two sets of inputs  L1
 
 
@@ -473,6 +476,8 @@ class CompactionL0 {
   // higher level than the ones involved in this compaction (i.e. for
   // all L >= level_ + 2).
   size_t level_ptrs_[config::kNumLevels];
+  std::string all_start_,all_limit_;
+
 };
 
 }  // namespace leveldb

@@ -47,7 +47,8 @@ extern const uint64_t MAX_PARTITION;
 extern const bool IS_FLUSH;
 
 extern const uint64_t L0_THREAD_NUMBER;
-
+extern int  extra_pm_log;
+extern const int extra_pm_log_const;
 typedef struct MetaNode{//size=64B
   uint32_t magic_number;
   uint16_t start_key_size;
@@ -58,7 +59,7 @@ typedef struct MetaNode{//size=64B
   uint64_t immu_pm_log;
   uint64_t other_immu_pm_log;
 }MetaNode;
-typedef  struct PmLogHead{//size=64B
+typedef  struct PmLogHead{//size=128B
   uint32_t magic_number;
   uint64_t file_size;
   uint64_t used_size;
@@ -66,6 +67,8 @@ typedef  struct PmLogHead{//size=64B
   char start_key[16];
   uint16_t end_key_size;
   char end_key[16];
+  uint64_t  next;
+  char padding[56];
 }PmLogHead;
 class NvmManager {
  public:

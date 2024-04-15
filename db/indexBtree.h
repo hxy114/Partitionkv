@@ -22,18 +22,20 @@ class PartitionIndexLayer{
  private:
 
   //存储分区 key range 的最大值，指针指向partitionnode
-  tlx::btree_map<std::string,PartitionNode*> *bmap;
+  tlx::btree_map<std::string,PartitionNode*> *bmap GUARDED_BY(mutex_);
   port::Mutex &mutex_;
   VersionSet *const versions_ GUARDED_BY(mutex_);
   InternalKeyComparator internal_comparator_;
   port::CondVar &background_work_finished_signal_L0_;
+  PmtableQueue &top_queue_;
   PmtableQueue &high_queue_;
   PmtableQueue &low_queue_;
   uint64_t  capacity_;
   DBImpl *dbImpl_;
 
-  void merge(PartitionNode *partitionNode);
-  void split(PartitionNode *partitionNode);
+  PartitionNode::Status merge(PartitionNode *partitionNode) ;
+  PartitionNode::Status split(PartitionNode *partitionNode);
+  PartitionNode::Status init_split(PartitionNode *partitionNode);
   PartitionNode * getAceeptNode(Version *current,PartitionNode *partitionNode);
  public:
 
@@ -41,6 +43,7 @@ class PartitionIndexLayer{
                       port::Mutex &mutex,
                       port::CondVar &background_work_finished_signal_L0_,
                       const InternalKeyComparator &internal_comparator,
+                      PmtableQueue &top_queue,
                       PmtableQueue &high_queue,
                       PmtableQueue &low_queue,
                       DBImpl *dbImpl);
@@ -55,7 +58,9 @@ class PartitionIndexLayer{
   bool remove_partition(PartitionNode *partition_node);
   bool remove_partition_by_key(std::string &key);
   void init();
+
   void recover();
+  tlx::btree_map<std::string,PartitionNode*> * get_bmap();
 };
 
 }

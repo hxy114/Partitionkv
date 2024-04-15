@@ -11,6 +11,8 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <unistd.h>
+#include <sys/syscall.h>
 
 
 #include "db/builder.h"
@@ -192,6 +194,7 @@ DBImpl::~DBImpl() {
   if (owns_cache_) {
     delete options_.block_cache;
   }
+  std::cout<<extra_pm_log;
 }
 
 Status DBImpl::NewDB() {
@@ -236,6 +239,73 @@ void DBImpl::MaybeIgnoreError(Status* s) const {
     Log(options_.info_log, "Ignoring error %s", s->ToString().c_str());
     *s = Status::OK();
   }
+}
+
+void DBImpl::RemoveObsoleteFilesL0() {
+  mutex_.AssertHeld();
+
+  if (!bg_error_.ok()) {
+    // After a background error, we don't know whether a new version may
+    // or may not have been committed, so we cannot safely garbage collect.
+    return;
+  }
+
+  // Make a set of all of the live files
+  std::set<uint64_t> live = pending_outputs_;
+  versions_->AddLiveFiles(&live);
+
+  std::vector<std::string> filenames;
+  env_->GetChildren(dbname_, &filenames);  // Ignoring errors on purpose
+  uint64_t number;
+  FileType type;
+  std::vector<std::string> files_to_delete;
+  for (std::string& filename : filenames) {
+    if (ParseFileName(filename, &number, &type)) {
+      bool keep = true;
+      switch (type) {
+        case kLogFile:
+          keep = ((number >= versions_->LogNumber()) ||
+                  (number == versions_->PrevLogNumber()));
+          break;
+        case kDescriptorFile:
+          // Keep my manifest file, and any newer incarnations'
+          // (in case there is a race that allows other incarnations)
+          keep = (number >= versions_->ManifestFileNumber());
+          break;
+        case kTableFile:
+          keep = (live.find(number) != live.end());
+          break;
+        case kTempFile:
+          // Any temp files that are currently being written to must
+          // be recorded in pending_outputs_, which is inserted into "live"
+          keep = (live.find(number) != live.end());
+          break;
+        case kCurrentFile:
+        case kDBLockFile:
+        case kInfoLogFile:
+          keep = true;
+          break;
+      }
+
+      if (!keep) {
+        files_to_delete.push_back(std::move(filename));
+        if (type == kTableFile) {
+          table_cache_->Evict(number);
+        }
+        Log(options_.info_log, "%d,Delete typeL0=%d #%lld\n", gettid(),static_cast<int>(type),
+            static_cast<unsigned long long>(number));
+      }
+    }
+  }
+
+  // While deleting all files unblock other threads. All files being deleted
+  // have unique names which will not collide with newly created files and
+  // are therefore safe to delete while allowing other threads to proceed.
+  mutex_.Unlock();
+  for (const std::string& filename : files_to_delete) {
+    env_->RemoveFile(dbname_ + "/" + filename);
+  }
+  mutex_.Lock();
 }
 
 void DBImpl::RemoveObsoleteFiles() {
@@ -289,7 +359,7 @@ void DBImpl::RemoveObsoleteFiles() {
         if (type == kTableFile) {
           table_cache_->Evict(number);
         }
-        Log(options_.info_log, "Delete type=%d #%lld\n", static_cast<int>(type),
+        Log(options_.info_log, "%d,Delete type=%d #%lld\n", gettid(),static_cast<int>(type),
             static_cast<unsigned long long>(number));
       }
     }
@@ -323,7 +393,7 @@ Status DBImpl::RecoverPartition(VersionEdit* edit, bool* save_manifest) {//TODO 
           dbname_.c_str());
       s = NewDB();//创建current和manifest
       nvmManager=new NvmManager(false);
-      partitionIndexLayer_=new PartitionIndexLayer(versions_,mutex_,background_work_finished_signal_L0_,internal_comparator_,high_queue_,low_queue_, this);
+      partitionIndexLayer_=new PartitionIndexLayer(versions_,mutex_,background_work_finished_signal_L0_,internal_comparator_,top_queue_,high_queue_,low_queue_, this);
       partitionIndexLayer_->init();
       if (!s.ok()) {
         return s;
@@ -778,7 +848,7 @@ void DBImpl::MaybeScheduleCompactionL0() {
     // DB is being deleted; no more background compactions
   } else if (!bg_error_.ok()) {
     // Already got an error; no more changes
-  } else if (high_queue_.capacity()==0&&low_queue_.capacity()==0) {
+  } else if (top_queue_.capacity()+high_queue_.capacity()+low_queue_.capacity()<=background_compaction_scheduled_L0_) {
     // No work to be done
   } else {
     background_compaction_scheduled_L0_++;
@@ -810,22 +880,30 @@ void DBImpl::BGWork(void* db) {
 }
 void DBImpl::BackgroundCallL0() {
   MutexLock l(&mutex_);
+  bool is_comp=false;
   assert(background_compaction_scheduled_L0_);
   if (shutting_down_.load(std::memory_order_acquire)) {
     // No more background work when shutting down.
   } else if (!bg_error_.ok()) {
     // No more background work after a background error.
   } else {
-    BackgroundCompactionL0();
+    is_comp=BackgroundCompactionL0();
   }
 
   background_compaction_scheduled_L0_ --;
 
   // Previous compaction may have produced too many files in a level,
   // so reschedule another compaction if needed.
-  MaybeScheduleCompactionL0();
-  MaybeScheduleCompaction();
-  background_work_finished_signal_L0_.SignalAll();
+
+
+    if(is_comp){
+    MaybeScheduleCompactionL0();
+    MaybeScheduleCompaction();
+    background_work_finished_signal_L0_.SignalAll();
+    }
+
+
+
 }
 void DBImpl::BackgroundCall() {
   MutexLock l(&mutex_);
@@ -847,7 +925,18 @@ void DBImpl::BackgroundCall() {
 }
 bool CoverRange(Slice start,Slice end,std::vector<std::pair<std::string,std::string>>&range){
   for(int i=0;i<range.size();i++){
-    if((start.compare(range[i].first)>=0&&start.compare(range[i].second)<=0)||(end.compare(range[i].first)>=0&&end.compare(range[i].second)<=0)){
+    Slice a,b;
+    if(start.compare(range[i].first)>=0){
+      a=start;
+    }else{
+      a=range[i].first;
+    }
+    if(end.compare(range[i].second)>=0){
+      b=range[i].second;
+    }else{
+      b=end;
+    }
+    if(a.compare(b)<=0){
       return true;
     }
   }
@@ -855,83 +944,213 @@ bool CoverRange(Slice start,Slice end,std::vector<std::pair<std::string,std::str
 }
 bool CoverRange(std::string &start,std::string &end,std::vector<std::pair<std::string,std::string>>&range){
   for(int i=0;i<range.size();i++){
-    if((start>=range[i].first&&start<=range[i].second)||(end>=range[i].first&&end<=range[i].second)){
+    if(max(start,range[i].first)<=min(end,range[i].second)){
       return true;
     }
+
+    /*if((start>=range[i].first&&start<=range[i].second)||(end>=range[i].first&&end<=range[i].second)){
+      return true;
+    }*/
   }
   return false;
 }
 void AddBoundaryInputs(const InternalKeyComparator& icmp,
                        const std::vector<FileMetaData*>& level_files,
                        std::vector<FileMetaData*>* compaction_files);
-void DBImpl::BackgroundCompactionL0(){
+bool DBImpl::BackgroundCompactionL0(){
   mutex_.AssertHeld();
-
+  auto current=versions_->current();
+  current->Ref();
+  //Log(options_.info_log,"seek L0");
   CompactionL0* c= nullptr;
-  auto high=high_queue_.GetHead(),low=low_queue_.GetHead();
-  high=high->next;
-  while(high!=high_queue_.GetHead()){
+  std::vector<std::pair<std::string,std::string>>top_range;
+  auto top=top_queue_.GetHead(),high=high_queue_.GetHead(),low=low_queue_.GetHead();
+  top=top->next;
+  while(top!=top_queue_.GetHead()){
 
-    auto immupmtableptr=high->pmTable_;
+    auto immupmtableptr=top->pmTable_;
     if(immupmtableptr->GetRole()==PmTable::other_immuPmtable||!immupmtableptr->GetLeftFather()->has_other_immupmtable()){
+      int n=1;
+      auto tmp=immupmtableptr;
       std::string startey=immupmtableptr->GetMinKey(),endkey=immupmtableptr->GetMaxKey();
-      bool is_cover=CoverRange(startey,endkey,L0_range_);
-      if(!is_cover){
-        std::vector<FileMetaData*>input;
-        versions_->current()->GetOverlappingInputs(1,startey,endkey,&input);
-
-        if(!input.empty()){
-          AddBoundaryInputs(versions_->icmp_, versions_->current()->files_[1], &input);
-          is_cover=CoverRange(input[0]->smallest.user_key(),input.back()->largest.user_key(),L1_range_);
+      while(tmp->next_){
+        tmp=tmp->next_;
+        n++;
+        if(startey.compare(tmp->GetMinKey())>0){
+          startey=tmp->GetMinKey();
         }
-
-        // Get entire range covered by compaction
-        if(!is_cover){
-          high_queue_.RemovePmtable(immupmtableptr);
-          immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
-          L0_range_.emplace_back(std::make_pair(startey,endkey));
-          if(!input.empty()) {
-            L1_range_.emplace_back(
-                std::make_pair(input[0]->smallest.user_key().ToString(),
-                               input.back()->largest.user_key().ToString()));
-          }
-          c = versions_->PickCompactionL0(immupmtableptr,input);
-          break;
+        if(endkey.compare(tmp->GetMaxKey())<0){
+          endkey=tmp->GetMaxKey();
         }
       }
-    }
-    high=high->next;
 
+      bool is_cover= CoverRange(startey,endkey,top_range);
+      if(!is_cover){
+        is_cover=CoverRange(startey,endkey,L0_range_);
+        if(!is_cover){
+          std::vector<FileMetaData*>input;
+          current->GetOverlappingInputs(1,startey,endkey,&input);
+          if(!input.empty()){
+            AddBoundaryInputs(versions_->icmp_, current->files_[1], &input);
+            is_cover=CoverRange(input[0]->smallest.user_key(),input.back()->largest.user_key(),L1_range_);
+
+          }
+          Slice all_start=startey,all_limit=endkey;
+          if(!input.empty()&&user_comparator()->Compare(all_start,input[0]->smallest.user_key())>0){
+            all_start=input[0]->smallest.user_key();
+          }
+          if(!input.empty()&&user_comparator()->Compare(all_limit,input.back()->largest.user_key())<0){
+            all_limit=input.back()->largest.user_key();
+          }
+
+          // Get entire range covered by compaction
+          if(!is_cover){
+            top_queue_.RemovePmtable(immupmtableptr);
+            immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
+            L0_range_.emplace_back(std::make_pair(all_start.ToString(),all_limit.ToString()));
+            if(!input.empty()) {
+              L1_range_.emplace_back(
+                  std::make_pair(all_start.ToString(),
+                                 all_limit.ToString()));
+            }
+            c = versions_->PickCompactionL0(immupmtableptr,input,n,all_start,all_limit,current);
+            break;
+          }
+        }
+      }
+
+     top_range.emplace_back(std::make_pair(startey,endkey));
+    }
+    top=top->next;
+
+  }
+  if(c== nullptr) {
+    high = high->next;
+    while (high != high_queue_.GetHead()) {
+      auto immupmtableptr = high->pmTable_;
+      if (immupmtableptr->GetRole() == PmTable::other_immuPmtable ||
+          !immupmtableptr->GetLeftFather()->has_other_immupmtable()) {
+        int n = 1;
+        auto tmp = immupmtableptr;
+        std::string startey = immupmtableptr->GetMinKey(),
+                    endkey = immupmtableptr->GetMaxKey();
+        while (tmp->next_) {
+          tmp = tmp->next_;
+          n++;
+          if (startey.compare(tmp->GetMinKey()) > 0) {
+            startey = tmp->GetMinKey();
+          }
+          if (endkey.compare(tmp->GetMaxKey()) < 0) {
+            endkey = tmp->GetMaxKey();
+          }
+        }
+
+        bool is_cover = CoverRange(startey, endkey, top_range);
+        if (!is_cover) {
+          is_cover = CoverRange(startey, endkey, L0_range_);
+          if (!is_cover) {
+            std::vector<FileMetaData*> input;
+            current->GetOverlappingInputs(1, startey, endkey,
+                                                       &input);
+            if (!input.empty()) {
+              AddBoundaryInputs(versions_->icmp_,
+                                current->files_[1], &input);
+              is_cover =
+                  CoverRange(input[0]->smallest.user_key(),
+                             input.back()->largest.user_key(), L1_range_);
+            }
+            Slice all_start = startey, all_limit = endkey;
+            if (!input.empty() &&
+                user_comparator()->Compare(all_start,
+                                           input[0]->smallest.user_key()) > 0) {
+              all_start = input[0]->smallest.user_key();
+            }
+            if (!input.empty() &&
+                user_comparator()->Compare(
+                    all_limit, input.back()->largest.user_key()) < 0) {
+              all_limit = input.back()->largest.user_key();
+            }
+
+            // Get entire range covered by compaction
+            if (!is_cover) {
+              high_queue_.RemovePmtable(immupmtableptr);
+              immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
+              L0_range_.emplace_back(
+                  std::make_pair(all_start.ToString(), all_limit.ToString()));
+              if (!input.empty()) {
+                L1_range_.emplace_back(
+                    std::make_pair(all_start.ToString(), all_limit.ToString()));
+              }
+              c = versions_->PickCompactionL0(immupmtableptr, input, n,
+                                              all_start, all_limit,current);
+              break;
+            }
+          }
+        }
+      }
+      high = high->next;
+    }
   }
   if(c== nullptr){
     low=low->next;
     while(low!=low_queue_.GetHead()){
 
       auto immupmtableptr=low->pmTable_;
-      if(immupmtableptr->GetRole()==PmTable::other_immuPmtable||!immupmtableptr->GetLeftFather()->has_other_immupmtable()){
-        std::string startey=immupmtableptr->GetMinKey(),endkey=immupmtableptr->GetMaxKey();
-        bool is_cover=CoverRange(startey,endkey,L0_range_);
-        if(!is_cover){
-          std::vector<FileMetaData*>input;
-          versions_->current()->GetOverlappingInputs(1,startey,endkey,&input);
-          if(!input.empty()){
-            AddBoundaryInputs(versions_->icmp_, versions_->current()->files_[1], &input);
-            is_cover=CoverRange(input[0]->smallest.user_key(),input.back()->largest.user_key(),L1_range_);
+      if(immupmtableptr->GetRole()==PmTable::other_immuPmtable||!immupmtableptr->GetLeftFather()->has_other_immupmtable()) {
+        int n = 1;
+        auto tmp = immupmtableptr;
+        std::string startey = immupmtableptr->GetMinKey(),
+                    endkey = immupmtableptr->GetMaxKey();
+        while (tmp->next_) {
+          tmp = tmp->next_;
+          n++;
+          if (startey.compare(tmp->GetMinKey()) > 0) {
+            startey = tmp->GetMinKey();
           }
-
-          // Get entire range covered by compaction
-          if(!is_cover){
-            low_queue_.RemovePmtable(immupmtableptr);
-            immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
-            L0_range_.emplace_back(std::make_pair(startey,endkey));
-            if(!input.empty()) {
-              L1_range_.emplace_back(
-                  std::make_pair(input[0]->smallest.user_key().ToString(),
-                                 input.back()->largest.user_key().ToString()));
+          if (endkey.compare(tmp->GetMaxKey()) < 0) {
+            endkey = tmp->GetMaxKey();
+          }
+        }
+        bool is_cover = CoverRange(startey, endkey, top_range);
+        if (!is_cover) {
+          is_cover = CoverRange(startey, endkey, L0_range_);
+          if (!is_cover) {
+            std::vector<FileMetaData*> input;
+            current->GetOverlappingInputs(1, startey, endkey,
+                                                       &input);
+            if (!input.empty()) {
+              AddBoundaryInputs(versions_->icmp_,
+                                current->files_[1], &input);
+              is_cover =
+                  CoverRange(input[0]->smallest.user_key(),
+                             input.back()->largest.user_key(), L1_range_);
             }
-            c = versions_->PickCompactionL0(immupmtableptr,input);
-            immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
-            break;
+            Slice all_start = startey, all_limit = endkey;
+            if (!input.empty() &&
+                user_comparator()->Compare(all_start,
+                                           input[0]->smallest.user_key()) > 0) {
+              all_start = input[0]->smallest.user_key();
+            }
+            if (!input.empty() &&
+                user_comparator()->Compare(
+                    all_limit, input.back()->largest.user_key()) < 0) {
+              all_limit = input.back()->largest.user_key();
+            }
+
+            // Get entire range covered by compaction
+            if (!is_cover) {
+              low_queue_.RemovePmtable(immupmtableptr);
+              immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
+              L0_range_.emplace_back(std::make_pair(all_start.ToString(), all_limit.ToString()));
+              if (!input.empty()) {
+                L1_range_.emplace_back(std::make_pair(
+                    all_start.ToString(),
+                    all_limit.ToString()));
+              }
+              c = versions_->PickCompactionL0(immupmtableptr, input,n,all_start,all_limit,current);
+              immupmtableptr->SetPmTableStatus(PmTable::IN_COMPACTIONING);
+              break;
+            }
           }
         }
       }
@@ -941,9 +1160,16 @@ void DBImpl::BackgroundCompactionL0(){
 
   }
 
+    for(int i=0;i<L0_range_.size();i++){
+      for(int j=i+1;j<L0_range_.size();j++){
+      assert(max(L0_range_[i].first,L0_range_[j].first)>min(L0_range_[i].second,L0_range_[j].second));
 
+      }
+    }
     Status status;
     if (c == nullptr) {
+    current->Unref();
+    return false;
       // Nothing to do
     }  else {
       CompactionState* compact = new CompactionState(c);
@@ -953,7 +1179,7 @@ void DBImpl::BackgroundCompactionL0(){
       }
       CleanupCompaction(compact);
       c->ReleaseInputs();
-      RemoveObsoleteFiles();
+      RemoveObsoleteFilesL0();
     }
     delete c;
 
@@ -962,8 +1188,9 @@ void DBImpl::BackgroundCompactionL0(){
     } else if (shutting_down_.load(std::memory_order_acquire)) {
       // Ignore compaction errors found during shutting down
     } else {
-      Log(options_.info_log, "Compaction error: %s", status.ToString().c_str());
+      Log(options_.info_log, "Compaction errorL0: %s", status.ToString().c_str());
     }
+    return true;
 
 
 
@@ -1022,6 +1249,15 @@ void DBImpl::BackgroundCompaction() {
     if (!status.ok()) {
       RecordBackgroundError(status);
     }
+
+    if (status.ok()) {
+      // Done
+    } else if (shutting_down_.load(std::memory_order_acquire)) {
+      // Ignore compaction errors found during shutting down
+    } else {
+      Log(options_.info_log, "Compaction error: %s", status.ToString().c_str());
+    }
+
     CleanupCompaction(compact);
     c->ReleaseInputs();
     RemoveObsoleteFiles();
@@ -1132,8 +1368,8 @@ Status DBImpl::FinishCompactionOutputFileL0(CompactionState* compact,
     s = iter->status();
     delete iter;
     if (s.ok()) {
-      Log(options_.info_log, "Generated table #%llu@%d: %lld keys, %lld bytes",
-          (unsigned long long)output_number, compact->compactionL0->level(),
+      Log(options_.info_log, "%d Generated tableL0 #%llu@%d: %lld keys, %lld bytes",
+          gettid(),(unsigned long long)output_number, compact->compactionL0->level(),
           (unsigned long long)current_entries,
           (unsigned long long)current_bytes);
     }
@@ -1180,8 +1416,8 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
     s = iter->status();
     delete iter;
     if (s.ok()) {
-      Log(options_.info_log, "Generated table #%llu@%d: %lld keys, %lld bytes",
-          (unsigned long long)output_number, compact->compaction->level(),
+      Log(options_.info_log, "%d,Generated table #%llu@%d: %lld keys, %lld bytes",
+          gettid(),(unsigned long long)output_number, compact->compaction->level(),
           (unsigned long long)current_entries,
           (unsigned long long)current_bytes);
     }
@@ -1190,8 +1426,8 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
 }
 Status DBImpl::InstallCompactionResultsL0(CompactionState* compact) {
   mutex_.AssertHeld();
-  Log(options_.info_log, "Compacted %d@%d + %d@%d files => %lld bytes",
-      1, compact->compactionL0->level(),
+  Log(options_.info_log, "%d,Compacted %d@%d + %d@%d files => %lld bytes",
+      gettid(),1, compact->compactionL0->level(),
       compact->compactionL0->num_input_filesL1(), compact->compactionL0->level() + 1,
       static_cast<long long>(compact->total_bytes));
 
@@ -1207,8 +1443,8 @@ Status DBImpl::InstallCompactionResultsL0(CompactionState* compact) {
 }
 Status DBImpl::InstallCompactionResults(CompactionState* compact) {
   mutex_.AssertHeld();
-  Log(options_.info_log, "Compacted %d@%d + %d@%d files => %lld bytes",
-      compact->compaction->num_input_files(0), compact->compaction->level(),
+  Log(options_.info_log, "%d,Compacted %d@%d + %d@%d files => %lld bytes",
+      gettid(),compact->compaction->num_input_files(0), compact->compaction->level(),
       compact->compaction->num_input_files(1), compact->compaction->level() + 1,
       static_cast<long long>(compact->total_bytes));
 
@@ -1226,8 +1462,8 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
-  Log(options_.info_log, "Compacting %d@%d + %d@%d files",
-      1, compact->compactionL0->level(),
+  Log(options_.info_log, "%d,CompactingL0 %d@%d + %d@%d files",
+      gettid(),compact->compactionL0->num_input_filesL0(), compact->compactionL0->level(),
       compact->compactionL0->num_input_filesL1(),
       compact->compactionL0->level() + 1);
 
@@ -1333,6 +1569,7 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
     input->Next();
   }
 
+
   if (status.ok() && shutting_down_.load(std::memory_order_acquire)) {
     status = Status::IOError("Deleting DB during compaction");
   }
@@ -1363,38 +1600,83 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
     status = InstallCompactionResultsL0(compact);
   }
   if(status.ok()){
-    auto immu=compact->compactionL0->inputL0();
-    immu->FreePmtable();
-    immu->SetPmTableStatus(PmTable::IN_COMPACTIONED);
+    auto all_limit=compact->compactionL0->GetMaxKey(),all_start=compact->compactionL0->GetMinKey();
+    auto immu=compact->compactionL0->inputL0(),tmp=immu;
+
+    for(int i=0;i<L0_range_.size();i++){
+      if(L0_range_[i].first==all_start&&L0_range_[i].second==all_limit){
+        L0_range_[i]=L0_range_.back();
+        L0_range_.pop_back();
+        break;
+      }
+    }
+
+    if(compact->compactionL0->num_input_filesL1()!=0){
+      for(int i=0;i<L1_range_.size();i++){
+        if(L1_range_[i].first==all_start
+            &&L1_range_[i].second==all_limit){
+          L1_range_[i]=L1_range_.back();
+          L1_range_.pop_back();
+          break;
+        }
+      }
+
+    }
+    assert(L1_range_.size()<=L0_range_.size());
+    int imuu_list_size=compact->compactionL0->num_input_filesL0();
     auto left_father=immu->GetLeftFather(),right_father=immu->GetRightFather();
+    for(int i=0;i<imuu_list_size;i++){
+      tmp->FreePmtable();
+      tmp->SetPmTableStatus(PmTable::IN_COMPACTIONED);
+      tmp=tmp->next_;
+    }
     if(left_father){
       if(immu->GetRole()==PmTable::immuPmtable){
-        left_father->reset_immuPmtable();
+        left_father->reset_immuPmtable(imuu_list_size,tmp);
       }else if(immu->GetRole()==PmTable::other_immuPmtable){
-        left_father->reset_other_immupmtable();
+        left_father->reset_other_immupmtable(imuu_list_size,tmp);
       }
       left_father->FLush();
     }
     if(right_father){
       if(immu->GetRole()==PmTable::immuPmtable){
-        right_father->reset_immuPmtable();
+        right_father->reset_immuPmtable(imuu_list_size,tmp);
       }else if(immu->GetRole()==PmTable::other_immuPmtable){
-        right_father->reset_other_immupmtable();
+        right_father->reset_other_immupmtable(imuu_list_size,tmp);
       }
       right_father->FLush();
     }
-      L0_range_.erase(std::remove_if(L0_range_.begin(), L0_range_.end(), [immu](std::pair<std::string,std::string>x) {return x.first ==immu->GetMinKey() &&x.second==immu->GetMaxKey() ; }), L0_range_.end());
-      if(compact->compactionL0->num_input_filesL1()!=0){
-      L1_range_.erase(std::remove_if(L1_range_.begin(), L1_range_.end(), [compact](std::pair<std::string,std::string>x) {return x.first ==compact->compactionL0->inputL1(0)->smallest.user_key() &&x.second==compact->compactionL0->inputL1(compact->compactionL0->num_input_filesL1()-1)->largest.user_key() ; }), L1_range_.end());
 
+    assert(tmp== nullptr||tmp->status_==PmTable::IN_HEAD);
+    if(tmp){
+      if(tmp->role_==PmTable::other_immuPmtable){
+        top_queue_.InsertPmtable(tmp);
+        tmp->status_=PmTable::IN_TOP_QUEUE;
       }
+      if(tmp->role_==PmTable::immuPmtable){
+        if(tmp->next_) {
+          top_queue_.InsertPmtable(tmp);
+          tmp->status_ = PmTable::IN_TOP_QUEUE;
+        }else {
+          low_queue_.InsertPmtable(tmp);
+          tmp->status_=PmTable::IN_LOW_QUQUE;
+        }
+      }
+      extra_pm_log=extra_pm_log+imuu_list_size;
+    }else{
+      extra_pm_log=extra_pm_log+imuu_list_size-1;
+    }
+
+
+
   }
 
   if (!status.ok()) {
+    Log(options_.info_log,"L0->L1 ERROR");
     RecordBackgroundError(status);
   }
   VersionSet::LevelSummaryStorage tmp;
-  Log(options_.info_log, "compacted to: %s", versions_->LevelSummary(&tmp));
+  Log(options_.info_log, "%d,compacted toL0: %s", gettid(),versions_->LevelSummary(&tmp));
   return status;
 
 }
@@ -1402,8 +1684,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
-  Log(options_.info_log, "Compacting %d@%d + %d@%d files",
-      compact->compaction->num_input_files(0), compact->compaction->level(),
+  Log(options_.info_log, "%d,Compacting %d@%d + %d@%d files",
+      gettid(),compact->compaction->num_input_files(0), compact->compaction->level(),
       compact->compaction->num_input_files(1),
       compact->compaction->level() + 1);
 
@@ -1555,7 +1837,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     RecordBackgroundError(status);
   }
   VersionSet::LevelSummaryStorage tmp;
-  Log(options_.info_log, "compacted to: %s", versions_->LevelSummary(&tmp));
+  Log(options_.info_log, "%d,compacted to: %s", gettid(),versions_->LevelSummary(&tmp));
   return status;
 }
 
@@ -1571,6 +1853,16 @@ struct IterState {
       : mu(mutex), version(version), mem(mem), imm(imm) {}
 };
 
+struct IterStateL0 {
+  port::Mutex* const mu;
+  Version* const version GUARDED_BY(mu);
+  std::vector<PmTable *> table GUARDED_BY(mu);
+
+
+  IterStateL0(port::Mutex* mutex, std::vector<PmTable*>&table, Version* version)
+      : mu(mutex), version(version), table(std::move(table)) {}
+};
+
 static void CleanupIteratorState(void* arg1, void* arg2) {
   IterState* state = reinterpret_cast<IterState*>(arg1);
   state->mu->Lock();
@@ -1581,7 +1873,68 @@ static void CleanupIteratorState(void* arg1, void* arg2) {
   delete state;
 }
 
+static void CleanupIteratorStateL0(void* arg1, void* arg2) {
+  IterStateL0* state = reinterpret_cast<IterStateL0*>(arg1);
+  state->mu->Lock();
+  for(int i=0;i<state->table.size();i++){
+    state->table[i]->Unref();
+  }
+  state->version->Unref();
+  state->mu->Unlock();
+  delete state;
+}
+
 }  // anonymous namespace
+
+Iterator* DBImpl::NewInternalIteratorL0(const ReadOptions& options,
+                                      SequenceNumber* latest_snapshot,
+                                      uint32_t* seed) {
+  mutex_.Lock();
+  *latest_snapshot = versions_->LastSequence();
+
+  // Collect together all needed child iterators
+  std::vector<Iterator*> list;
+  std::vector<PmTable*>table_list;
+  //list.push_back(mem_->NewIterator());
+  auto bmap=partitionIndexLayer_->get_bmap();
+  for(auto iter=bmap->begin();iter!=bmap->end();iter++){
+    auto partionNode=iter->second;
+    auto pmtable=partionNode->pmtable;
+    auto immupmtable_list=partionNode->immuPmtable;
+    auto otherpmtable_list=partionNode->other_immuPmtable;
+    if(pmtable){
+      list.push_back(pmtable->NewIterator());
+      table_list.push_back(pmtable);
+      pmtable->Ref();
+    }
+    while(immupmtable_list!= nullptr){
+      list.push_back(immupmtable_list->NewIterator());
+      table_list.push_back(immupmtable_list);
+      immupmtable_list->Ref();
+      immupmtable_list=immupmtable_list->next_;
+    }
+
+    while(otherpmtable_list!= nullptr){
+      list.push_back(otherpmtable_list->NewIterator());
+      table_list.push_back(otherpmtable_list);
+      otherpmtable_list->Ref();
+      otherpmtable_list=otherpmtable_list->next_;
+    }
+  }
+
+
+  versions_->current()->AddIterators(options, &list);
+  Iterator* internal_iter =
+      NewMergingIterator(&internal_comparator_, &list[0], list.size());
+  versions_->current()->Ref();
+
+  IterStateL0* cleanup = new IterStateL0(&mutex_, table_list, versions_->current());
+  internal_iter->RegisterCleanup(CleanupIteratorStateL0, cleanup, nullptr);
+
+  *seed = ++seed_;
+  mutex_.Unlock();
+  return internal_iter;
+}
 
 Iterator* DBImpl::NewInternalIterator(const ReadOptions& options,
                                       SequenceNumber* latest_snapshot,
@@ -1620,7 +1973,14 @@ int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
   MutexLock l(&mutex_);
   return versions_->MaxNextLevelOverlappingBytes();
 }
-
+bool DBImpl::Get(std::vector<PmTable*>&list,const LookupKey& key, std::string* value, Status* s){
+  for(int i=list.size()-1;i>=0;i--){
+    if(list[i]->Get(key,value,s)){
+      return true;
+    }
+  }
+  return false;
+}
 Status DBImpl::Get(const ReadOptions& options, const Slice& key,
                    std::string* value) {
   if(use_partition_){
@@ -1635,11 +1995,23 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     }
     PartitionNode *partitionNode=partitionIndexLayer_->seek_partition(key.ToString());
     PmTable *mem=partitionNode->pmtable,*imm=partitionNode->immuPmtable,*other=partitionNode->other_immuPmtable;
+    std::vector<PmTable*>immu_list,other_list;
 
     Version* current = versions_->current();
-    mem->Ref();
-    if (imm != nullptr) imm->Ref();
-    if (other!= nullptr) other->Ref();
+    if(mem){
+      mem->Ref();
+    }
+
+    while(imm!= nullptr){
+      imm->Ref();
+      immu_list.push_back(imm);
+      imm=imm->next_;
+    }
+    while(other!= nullptr){
+      other->Ref();
+      other_list.push_back(other);
+      other=other->next_;
+    }
     current->Ref();
 
     bool have_stat_update = false;
@@ -1650,11 +2022,11 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
       mutex_.Unlock();
       // First look in the memtable, then in the immutable memtable (if any).
       LookupKey lkey(key, snapshot);
-      if (mem->Get(lkey, value, &s)) {
+      if (mem!= nullptr&&mem->Get(lkey, value, &s)) {
         // Done
-      } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
+      } else if (!other_list.empty() && Get(other_list,lkey, value, &s)) {
         // Done
-      } else if(other!= nullptr &&other->Get(lkey,value,&s)){
+      } else if(!immu_list.empty()  &&Get(immu_list,lkey,value,&s)){
         // Done
       }else {
         s = current->Get(options, lkey, value, &stats);
@@ -1667,8 +2039,15 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
       MaybeScheduleCompaction();
     }
     mem->Unref();
-    if (imm != nullptr) imm->Unref();
-    if (other!= nullptr) other->Unref();
+
+    for(int i=0;i<other_list.size();i++){
+      other_list[i]->Unref();
+    }
+
+    for(int i=0;i<immu_list.size();i++){
+      immu_list[i]->Unref();
+    }
+
     current->Unref();
     return s;
 
@@ -1724,6 +2103,15 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
 
 Iterator* DBImpl::NewIterator(const ReadOptions& options) {
   if(use_partition_){//TODO 范围查询
+    SequenceNumber latest_snapshot;
+    uint32_t seed;
+    Iterator* iter = NewInternalIteratorL0(options, &latest_snapshot, &seed);
+    return NewDBIterator(this, user_comparator(), iter,
+                         (options.snapshot != nullptr
+                              ? static_cast<const SnapshotImpl*>(options.snapshot)
+                                    ->sequence_number()
+                              : latest_snapshot),
+                         seed);
 
   }else{
     SequenceNumber latest_snapshot;

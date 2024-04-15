@@ -44,6 +44,7 @@ class DBImpl : public DB {
              const Slice& value) override;
   Status Delete(const WriteOptions&, const Slice& key) override;
   Status Write(const WriteOptions& options, WriteBatch* updates) override;
+  bool Get(std::vector<PmTable*>&list,const LookupKey& key, std::string* value, Status* s);
   Status Get(const ReadOptions& options, const Slice& key,
              std::string* value) override;
   Iterator* NewIterator(const ReadOptions&) override;
@@ -106,6 +107,9 @@ class DBImpl : public DB {
     int64_t bytes_written;
   };
 
+  Iterator* NewInternalIteratorL0(const ReadOptions&,
+                                SequenceNumber* latest_snapshot,
+                                uint32_t* seed);
   Iterator* NewInternalIterator(const ReadOptions&,
                                 SequenceNumber* latest_snapshot,
                                 uint32_t* seed);
@@ -124,6 +128,7 @@ class DBImpl : public DB {
 
   // Delete any unneeded files and stale in-memory entries.
   void RemoveObsoleteFiles() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  void RemoveObsoleteFilesL0() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Compact the in-memory write buffer to disk.  Switches to a new
   // log-file/memtable and writes a new descriptor iff successful.
@@ -152,7 +157,7 @@ class DBImpl : public DB {
   void BackgroundCall();
   void BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  void BackgroundCompactionL0() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  bool BackgroundCompactionL0() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void CleanupCompaction(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   Status DoCompactionWork(CompactionState* compact)
@@ -222,12 +227,14 @@ class DBImpl : public DB {
 
   CompactionStats stats_[config::kNumLevels] GUARDED_BY(mutex_);
 
+  PmtableQueue top_queue_ GUARDED_BY(mutex_);
   PmtableQueue high_queue_ GUARDED_BY(mutex_);
   PmtableQueue low_queue_ GUARDED_BY(mutex_);
 
-  std::vector<std::pair<std::string,std::string>>L0_range_;
-  std::vector<std::pair<std::string,std::string>>L1_range_;
-  std::vector<std::pair<std::string,std::string>>L2_range_;
+  std::vector<std::pair<std::string,std::string>>L0_range_ GUARDED_BY(mutex_);
+  std::vector<std::pair<std::string,std::string>>L1_range_ GUARDED_BY(mutex_);
+  std::vector<std::pair<std::string,std::string>>L2_range_ GUARDED_BY(mutex_);
+
 
 };
 

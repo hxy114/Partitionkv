@@ -4,6 +4,7 @@
 // Copyright (c) 2011 The LevelDB Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
+#include <unistd.h>
 
 #include "db/pmtable.h"
 #include "db/dbformat.h"
@@ -12,6 +13,7 @@
 #include "leveldb/iterator.h"
 #include "util/coding.h"
 #include "db/partition_node.h"
+
 namespace leveldb {
 
 static Slice GetLengthPrefixedSlice(const char* data) {
@@ -21,12 +23,13 @@ static Slice GetLengthPrefixedSlice(const char* data) {
   return Slice(p, len);
 }
 
-PmTable::PmTable(const InternalKeyComparator& comparator,PartitionNode *partitionNode)
+PmTable::PmTable(const InternalKeyComparator& comparator,PartitionNode *partitionNode,PmLogHead* pmLogHead)
     : comparator_(comparator), refs_(0),
-      pmLogHead_(nvmManager->get_pm_log()),
+      pmLogHead_(pmLogHead),
       nvmArena_(pmLogHead_),
       table_(comparator_, &arena_),
-      role_(pmtable),status_(IN_RECEVIE),right_father_(nullptr){
+      role_(pmtable),status_(IN_RECEVIE),right_father_(nullptr),next_(nullptr){
+  assert(pmLogHead_!= nullptr);
   left_father_=partitionNode;
   init(partitionNode);}
 void PmTable::init(PartitionNode *partitionNode){
@@ -37,6 +40,7 @@ void PmTable::init(PartitionNode *partitionNode){
   pmem_memcpy_nodrain(&(pmLogHead_->end_key),partitionNode->end_key.c_str(),partitionNode->end_key.size());
   pmLogHead_->used_size=PM_LOG_HEAD_SIZE;
   pmLogHead_->file_size=PM_LOG_SIZE;
+  pmLogHead_->next=0;
   pmem_persist(&pmLogHead_,PM_LOG_HEAD_SIZE);
 }
 void PmTable::FreePmtable(){
@@ -49,6 +53,29 @@ PmTable::~PmTable() { assert(refs_ == 0);
 }
 void PmTable::SetRole(Role role){
   role_=role;
+  auto t=next_;
+  while(t!= nullptr){
+    t->role_=role;
+    t=t->next_;
+  }
+}
+void PmTable::SetLeftFather(PartitionNode *left_father){
+  left_father_=left_father;
+  auto t=next_;
+  while(t!= nullptr){
+    t->left_father_=left_father;
+    t=t->next_;
+  }
+
+}
+void PmTable::SetRightFather(PartitionNode *right_father){
+  right_father_=right_father;
+  auto t=next_;
+  while(t!= nullptr){
+    t->right_father_=right_father;
+    t=t->next_;
+  }
+
 }
 PmTable::Role PmTable::GetRole(){
   return role_;
@@ -64,6 +91,10 @@ PartitionNode * PmTable::GetLeftFather(){
 }
 PartitionNode * PmTable::GetRightFather(){
     return  right_father_;
+}
+void PmTable::SetNext(PmTable *pmTable){
+    next_=pmTable;
+    pmLogHead_->next=(uint64_t)pmTable->pmLogHead_-(uint64_t)nvmManager->get_base();
 }
 size_t PmTable::ApproximateMemoryUsage() { return nvmArena_.MemoryUsage(); }
 

@@ -901,6 +901,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     builder.Apply(edit);
     builder.SaveTo(v);
   }
+
   Finalize(v);
 
   // Initialize new descriptor log file if necessary by creating
@@ -921,7 +922,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 
   // Unlock during expensive MANIFEST log write
   {
-    mu->Unlock();
+    //mu->Unlock();
 
     // Write new record to MANIFEST log
     if (s.ok()) {
@@ -929,7 +930,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
       edit->EncodeTo(&record);
       s = descriptor_log_->AddRecord(record);
       if (s.ok()) {
-        s = descriptor_file_->Sync();
+        //s = descriptor_file_->Sync();
       }
       if (!s.ok()) {
         Log(options_->info_log, "MANIFEST write: %s\n", s.ToString().c_str());
@@ -942,7 +943,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
       s = SetCurrentFile(env_, dbname_, manifest_file_number_);
     }
 
-    mu->Lock();
+    //mu->Lock();
   }
 
   // Install the new version
@@ -1329,30 +1330,30 @@ Iterator* VersionSet::MakeInputIteratorL0(CompactionL0* c) {
   // Level-0 files have to be merged together.  For other levels,
   // we will make a concatenating iterator per level.
   // TODO(opt): use concatenating iterator for level-0 if there is no overlap
-  const int space = 2;
+  const int space = c->pmTable_list_size_+1;
   Iterator** list = new Iterator*[space];
+
   int num = 0;
-
-
   PmTable *pmtable = c->pmTable_;
-  list[num++]=pmtable->NewIterator();
+  //list[num++]=pmtable->NewIterator();
+  for (size_t i = 0; i < c->pmTable_list_size_; i++) {
+    assert(pmtable!= nullptr);
+    list[num++] = pmtable->NewIterator();
+    pmtable=pmtable->next_;
+  }
 
   if (!c->inputs_.empty()) {
 
-      // Create concatenating iterator for the files from this level
-      list[num++] = NewTwoLevelIterator(
+    // Create concatenating iterator for the files from this level
+    list[num++] = NewTwoLevelIterator(
           new Version::LevelFileNumIterator(icmp_, &c->inputs_),
           &GetFileIterator, table_cache_, options);
-    }
-
-
-
-
-
+  }
   assert(num <= space);
   Iterator* result = NewMergingIterator(&icmp_, list, num);
   delete[] list;
   return result;
+
 }
 Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   ReadOptions options;
@@ -1386,26 +1387,27 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   delete[] list;
   return result;
 }
-CompactionL0* VersionSet::PickCompactionL0(PmTable *pmtable,std::vector<FileMetaData*>&input){
+std::string CompactionL0::GetMaxKey(){
+    return  all_limit_;
+}
+std::string CompactionL0::GetMinKey(){
+  return all_start_;
+}
+CompactionL0* VersionSet::PickCompactionL0(PmTable *pmtable,std::vector<FileMetaData*>&input,int n,Slice &all_start,Slice &all_limit,Version *current){
 
   CompactionL0* c;
 
   c = new CompactionL0(options_);
   c->pmTable_=pmtable;
   c->input_version_ = current_;
-  c->input_version_->Ref();
-
-
+  //c->input_version_->Ref();
+  c->all_start_=all_start.ToString();
+  c->all_limit_=all_limit.ToString();
+  c->pmTable_list_size_=n;
 
   // Compute the set of grandparent files that overlap this compaction
   // (parent == level+1; grandparent == level+2)
-  Slice all_start=pmtable->GetMinKey(),all_limit=pmtable->GetMaxKey();
-  if(!input.empty()&&icmp_.user_comparator()->Compare(all_start,input[0]->smallest.user_key())>0){
-    all_start=input[0]->smallest.user_key();
-  }
-  if(!input.empty()&&icmp_.user_comparator()->Compare(all_limit,input.back()->largest.user_key())<0){
-    all_limit=input.back()->largest.user_key();
-  }
+
   c->inputs_=std::move(input);
   current_->GetOverlappingInputs(2, all_start.ToString(), all_limit.ToString(),
                                    &c->grandparents_);

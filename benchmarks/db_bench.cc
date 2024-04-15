@@ -65,27 +65,30 @@
     "zstduncomp,";*/
 static const char* FLAGS_benchmarks =
     "fillrandom,"
-    "readrandom,";
+    "stats,"
+    //"readrandom,"  // Extra run to allow previous compactions to quiesce
+    //"stats,"
+    "readseq,";
 
 
 // Number of key/values to place in database
 static int FLAGS_num = 50000000;
 
 // Number of read operations to do.  If negative, do FLAGS_num reads.
-static int FLAGS_reads = -1;
+static int FLAGS_reads = 1000000;
 
 // Number of concurrent threads to run.
 static int FLAGS_threads = 1;
 
 // Size of each value
-static int FLAGS_value_size = 1000;
+static int FLAGS_value_size = 1024;
 
 // Arrange to generate values that shrink to this fraction of
 // their original size after compression
 static double FLAGS_compression_ratio = 0.5;
 
 // Print histogram of operation timings
-static bool FLAGS_histogram = false;
+static bool FLAGS_histogram = true;
 
 // Count the number of string comparisons performed
 static bool FLAGS_comparisons = false;

@@ -14,20 +14,24 @@ PartitionNode::PartitionNode(const std::string &start_key1,
                              port::Mutex &mutex,
                              port::CondVar &background_work_finished_signal_L0,
                              InternalKeyComparator &internal_comparator,
+                             PmtableQueue &top_queue,
                              PmtableQueue &high_queue,
                              PmtableQueue &low_queue,
+
                              DBImpl *dbImpl)
               :versions_(versions),
               mutex_(mutex),base_(nvmManager->get_base()),
               metaNode(metaNode1),internal_comparator_(internal_comparator),
               background_work_finished_signal_L0_(background_work_finished_signal_L0),
+              top_queue_(top_queue),
               high_queue_(high_queue),
               low_queue_(low_queue),
               dbImpl_(dbImpl),
               refs_(0),
               immuPmtable(nullptr),
               other_immuPmtable(nullptr),
-              pmtable(nullptr){
+              pmtable(nullptr),
+              immu_number_(0){
   init(start_key1,end_key1);
 }
 
@@ -71,19 +75,44 @@ void PartitionNode::set_range(std::string &startkey,std::string &endkey){
   pmem_memcpy_nodrain(&metaNode->start_key,endkey.c_str(),endkey.size());
   //pmem_drain();
 }
-void PartitionNode::set_other_immupmtable(PmTable *otherImmuPmtable1){
+void PartitionNode::set_other_immupmtable(PmTable *otherImmuPmtable1){//增加一堆
   assert(other_immuPmtable== nullptr&&otherImmuPmtable1!= nullptr);
-  otherImmuPmtable1->Ref();
+  auto tmp=otherImmuPmtable1;
+  while(tmp){
+    tmp->Ref();
+    tmp=tmp->next_;
+  }
   other_immuPmtable=otherImmuPmtable1;
   metaNode->other_immu_pm_log=(uint64_t)other_immuPmtable->pmLogHead_-(uint64_t)base_;
   //pmem_drain();
 
 }
-void PartitionNode::set_immuPmtable(PmTable *immuPmtable1){
+void PartitionNode::set_immuPmtable(PmTable *immuPmtable1){//增加一个
   assert(immuPmtable== nullptr&&immuPmtable1!= nullptr);
   immuPmtable1->Ref();
   immuPmtable=immuPmtable1;
   metaNode->immu_pm_log=(uint64_t)immuPmtable->pmLogHead_-(uint64_t)base_;
+  //pmem_drain();
+
+}
+void PartitionNode::add_immuPmtable(PmTable *immuPmtable1){//增加一个
+  //assert(immuPmtable== nullptr&&immuPmtable1!= nullptr);
+  immuPmtable1->Ref();
+  if(immuPmtable== nullptr){
+    immuPmtable=immuPmtable1;
+    immuPmtable1->status_=PmTable::IN_HEAD;
+    metaNode->immu_pm_log=(uint64_t)immuPmtable->pmLogHead_-(uint64_t)base_;
+  }else{
+    extra_pm_log--;
+    assert(extra_pm_log>=0);
+    auto tmp=immuPmtable;
+    while(tmp->next_!= nullptr){
+      tmp=tmp->next_;
+    }
+    tmp->SetNext(immuPmtable1);
+    immuPmtable1->status_=PmTable::IN_FOLLOW;
+  }
+  immu_number_++;
   //pmem_drain();
 
 }
@@ -94,21 +123,76 @@ void PartitionNode::set_pmtable(PmTable *pmTable){
   metaNode->pm_log=(uint64_t)pmtable->pmLogHead_-(uint64_t)base_;
   //pmem_drain();
 }
-void PartitionNode::reset_other_immupmtable(){
-  if(other_immuPmtable!= nullptr){
-    other_immuPmtable->Unref();
+void PartitionNode::reset_other_immupmtable(int n,PmTable *pm){
+  PmTable* tmp=other_immuPmtable,*next;
+  assert(n>0);
+  while(n--){
+    next=tmp->next_;
+    tmp->Unref();
+    tmp=next;
   }
+  assert(tmp==pm);
+  other_immuPmtable= pm;
+  if(other_immuPmtable){
+    other_immuPmtable->status_=PmTable::IN_HEAD;
+    metaNode->other_immu_pm_log=(uint64_t)other_immuPmtable->pmLogHead_-(uint64_t)base_;
+  }else{
+    metaNode->other_immu_pm_log=0;
+  }
+
+  //pmem_drain();
+
+}
+void PartitionNode::reset_immuPmtable(int n,PmTable *pm){
+
+  PmTable* tmp=immuPmtable,*next;
+  assert(n>0);
+  int i=n;
+  while(i--){
+    next=tmp->next_;
+    tmp->Unref();
+    tmp=next;
+  }
+  assert(tmp==pm);
+  immuPmtable= pm;
+  if(immuPmtable){
+    immuPmtable->status_=PmTable::IN_HEAD;
+    metaNode->immu_pm_log=(uint64_t)immuPmtable->pmLogHead_-(uint64_t)base_;
+  }else{
+    metaNode->immu_pm_log=0;
+  }
+
+  immu_number_=immu_number_-n;
+  //pmem_drain();
+
+}
+
+void PartitionNode::reset_other_immupmtable(){
+  PmTable* tmp=other_immuPmtable,*next;
+  while(tmp){
+    next=tmp->next_;
+    tmp->Unref();
+    tmp=next;
+  }
+
   other_immuPmtable= nullptr;
   metaNode->other_immu_pm_log=0;
   //pmem_drain();
 
 }
 void PartitionNode::reset_immuPmtable(){
-  if(immuPmtable!= nullptr){
-    immuPmtable->Unref();
+  PmTable* tmp=immuPmtable,*next;
+  while(tmp){
+    next=tmp->next_;
+    tmp->Unref();
+    tmp=next;
   }
+
   immuPmtable= nullptr;
   metaNode->immu_pm_log=0;
+
+
+  immu_number_=0;
   //pmem_drain();
 
 }
@@ -133,38 +217,61 @@ std::string & PartitionNode::get_start_key(){
   return start_key;
 }
 PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const Slice& key,
-                                const Slice& value,bool is_force) {
+                                const Slice& value,bool is_force,size_t capacity) {
 
   bool ret=pmtable->Add(s,type,key,value);
   if(!ret){
-    if(is_force){
-      mutex_.Lock();
-      while(immuPmtable!= nullptr){
-        //std::cout<<"插入睡眠"<<std::endl;
+    mutex_.Lock();
+    PmTable *immupmTable=pmtable;
+
+    const uint64_t start_micros = dbImpl_->env_->NowMicros();
+    Log(dbImpl_->options_.info_log,"top_queue:%zu,high_queue:%zu,low_queue:%zu,thread:%d",top_queue_.capacity(),high_queue_.capacity(),low_queue_.capacity(),dbImpl_->background_compaction_scheduled_L0_);
+    if(capacity<MIN_PARTITION){
+      while(immu_number_>=3){
         background_work_finished_signal_L0_.Wait();
-        //std::cout<<"插入睡醒"<<std::endl;
       }
-      PmTable *immupmTable=pmtable;
-      set_immuPmtable(immupmTable);
-      reset_pmtable();
-      immupmTable->role_=PmTable::immuPmtable;
+    }
+    while(immu_number_>=1&&extra_pm_log<=0){
+      background_work_finished_signal_L0_.Wait();
+    }
+
+    const uint64_t cost = dbImpl_->env_->NowMicros() - start_micros;
+    if(cost>20000){
+      Log(dbImpl_->options_.info_log,"top_queue:%zu,high_queue:%zu,low_queue:%zu,thread:%d",top_queue_.capacity(),high_queue_.capacity(),low_queue_.capacity(),dbImpl_->background_compaction_scheduled_L0_);
+      Log(dbImpl_->options_.info_log,"L0 immu wait %ld",cost);
+    }
+
+    add_immuPmtable(immupmTable);
+    reset_pmtable();
+    immupmTable->role_=PmTable::immuPmtable;
+    if(immupmTable->status_==PmTable::IN_HEAD){
       immupmTable->status_=PmTable::IN_LOW_QUQUE;
       low_queue_.InsertPmtable(immupmTable);
-      dbImpl_->MaybeScheduleCompactionL0();
-      PmTable *pmTable1=new PmTable(internal_comparator_,this);
-      set_pmtable(pmTable1);
+    }else if(immuPmtable->status_==PmTable::IN_HIGH_QUEUE){
+      high_queue_.RemovePmtable(immuPmtable);
+      top_queue_.InsertPmtable(immuPmtable);
+      immuPmtable->status_=PmTable::IN_TOP_QUEUE;
+    }else if(immuPmtable->status_==PmTable::IN_LOW_QUQUE){
+      low_queue_.RemovePmtable(immuPmtable);
+      top_queue_.InsertPmtable(immuPmtable);
+      immuPmtable->status_=PmTable::IN_TOP_QUEUE;
+    }
+    dbImpl_->MaybeScheduleCompactionL0();
+
+    if(is_force){
+      PmLogHead *pmlog= nullptr;
+      while((pmlog=nvmManager->get_pm_log())== nullptr){
+        background_work_finished_signal_L0_.Wait();
+      }
+      PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
+
+
+      set_pmtable(newPmTable);
       mutex_.Unlock();
       FLush();
       pmtable->Add(s,type,key,value);
       return sucess;
     }else{
-      mutex_.Lock();
-      while(immuPmtable!= nullptr){
-        //std::cout<<"插入睡眠"<<std::endl;
-        background_work_finished_signal_L0_.Wait();
-        //std::cout<<"插入睡醒"<<std::endl;
-      }
-
       Status status=sucess;
       auto current=versions_->current();
       bool has_other_immupmtable= other_immuPmtable != nullptr;
@@ -175,6 +282,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
       InternalKey start=InternalKey(start_key, max_snapshot, ValueType::kTypeValue) ;
       InternalKey end=InternalKey(end_key, min_snapshot, ValueType::kTypeValue) ;
       auto size=current->GetOverlappingSize(1,&start,&end);
+
       if(cover_.size()<K){
           cover_.push_back(size);
       }else{
@@ -183,7 +291,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
       }
 
       if(!has_other_immupmtable){
-          if(size>=SPLIT){
+          if(capacity<MIN_PARTITION||size>=SPLIT){
             status=split;
             mutex_.Lock();
             current->Unref();
@@ -198,15 +306,13 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
           }else{
             if((status=needSplitOrMerge())==sucess){
               mutex_.Lock();
-              PmTable *immupmTable=pmtable;
-              set_immuPmtable(immupmTable);
-              reset_pmtable();
-              immupmTable->role_=PmTable::immuPmtable;
-              immupmTable->status_=PmTable::IN_LOW_QUQUE;
-              low_queue_.InsertPmtable(immupmTable);
-              dbImpl_->MaybeScheduleCompactionL0();
-              PmTable *pmTable1=new PmTable(internal_comparator_,this);
-              set_pmtable(pmTable1);
+              PmLogHead *pmlog= nullptr;
+              while((pmlog=nvmManager->get_pm_log())== nullptr){
+                background_work_finished_signal_L0_.Wait();
+              }
+              PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
+
+              set_pmtable(newPmTable);
               current->Unref();
               mutex_.Unlock();
               FLush();
@@ -221,15 +327,13 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
 
       }else{
           mutex_.Lock();
-          PmTable *immupmTable=pmtable;
-          set_immuPmtable(immupmTable);
-          reset_pmtable();
-          immupmTable->role_=PmTable::immuPmtable;
-          immupmTable->status_=PmTable::IN_LOW_QUQUE;
-          low_queue_.InsertPmtable(immupmTable);
+          PmLogHead *pmlog= nullptr;
+          while((pmlog=nvmManager->get_pm_log())== nullptr){
+            background_work_finished_signal_L0_.Wait();
+          }
+          PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
 
-          PmTable *pmTable1=new PmTable(internal_comparator_,this);
-          set_pmtable(pmTable1);
+          set_pmtable(newPmTable);
           current->Unref();
           mutex_.Unlock();
           FLush();
@@ -252,6 +356,10 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
 
   return PartitionNode::Status::sucess;
 
+}
+void PartitionNode::reset_cover(){
+  cover_.clear();
+  index_=0;
 }
 PartitionNode::Status PartitionNode::needSplitOrMerge(){
   Status status=sucess;
