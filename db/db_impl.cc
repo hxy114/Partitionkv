@@ -14,7 +14,7 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 
-#define gettid() syscall(__NR_gettid)
+
 
 #include "db/builder.h"
 #include "db/db_iter.h"
@@ -293,7 +293,9 @@ void DBImpl::RemoveObsoleteFilesL0() {
         if (type == kTableFile) {
           table_cache_->Evict(number);
         }
-        Log(options_.info_log, "%d,Delete typeL0=%d #%lld\n", gettid(),static_cast<int>(type),
+        /*Log(options_.info_log, "%d,Delete typeL0=%d #%lld\n", gettid(),static_cast<int>(type),
+            static_cast<unsigned long long>(number));*/
+        Log(options_.info_log, "Delete typeL0=%d #%lld\n", static_cast<int>(type),
             static_cast<unsigned long long>(number));
       }
     }
@@ -360,7 +362,9 @@ void DBImpl::RemoveObsoleteFiles() {
         if (type == kTableFile) {
           table_cache_->Evict(number);
         }
-        Log(options_.info_log, "%d,Delete type=%d #%lld\n", gettid(),static_cast<int>(type),
+        /*Log(options_.info_log, "%d,Delete type=%d #%lld\n", gettid(),static_cast<int>(type),
+            static_cast<unsigned long long>(number));*/
+        Log(options_.info_log, "Delete type=%d #%lld\n", static_cast<int>(type),
             static_cast<unsigned long long>(number));
       }
     }
@@ -1369,8 +1373,12 @@ Status DBImpl::FinishCompactionOutputFileL0(CompactionState* compact,
     s = iter->status();
     delete iter;
     if (s.ok()) {
-      Log(options_.info_log, "%d Generated tableL0 #%llu@%d: %lld keys, %lld bytes",
+      /*Log(options_.info_log, "%d Generated tableL0 #%llu@%d: %lld keys, %lld bytes",
           gettid(),(unsigned long long)output_number, compact->compactionL0->level(),
+          (unsigned long long)current_entries,
+          (unsigned long long)current_bytes);*/
+      Log(options_.info_log, "Generated tableL0 #%llu@%d: %lld keys, %lld bytes",
+          (unsigned long long)output_number, compact->compactionL0->level(),
           (unsigned long long)current_entries,
           (unsigned long long)current_bytes);
     }
@@ -1417,8 +1425,12 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
     s = iter->status();
     delete iter;
     if (s.ok()) {
-      Log(options_.info_log, "%d,Generated table #%llu@%d: %lld keys, %lld bytes",
+     /* Log(options_.info_log, "%d,Generated table #%llu@%d: %lld keys, %lld bytes",
           gettid(),(unsigned long long)output_number, compact->compaction->level(),
+          (unsigned long long)current_entries,
+          (unsigned long long)current_bytes);*/
+      Log(options_.info_log, "Generated table #%llu@%d: %lld keys, %lld bytes",
+          (unsigned long long)output_number, compact->compaction->level(),
           (unsigned long long)current_entries,
           (unsigned long long)current_bytes);
     }
@@ -1427,8 +1439,12 @@ Status DBImpl::FinishCompactionOutputFile(CompactionState* compact,
 }
 Status DBImpl::InstallCompactionResultsL0(CompactionState* compact) {
   mutex_.AssertHeld();
-  Log(options_.info_log, "%d,Compacted %d@%d + %d@%d files => %lld bytes",
+  /*Log(options_.info_log, "%d,Compacted %d@%d + %d@%d files => %lld bytes",
       gettid(),1, compact->compactionL0->level(),
+      compact->compactionL0->num_input_filesL1(), compact->compactionL0->level() + 1,
+      static_cast<long long>(compact->total_bytes));*/
+  Log(options_.info_log, "Compacted %d@%d + %d@%d files => %lld bytes",
+      1, compact->compactionL0->level(),
       compact->compactionL0->num_input_filesL1(), compact->compactionL0->level() + 1,
       static_cast<long long>(compact->total_bytes));
 
@@ -1444,8 +1460,12 @@ Status DBImpl::InstallCompactionResultsL0(CompactionState* compact) {
 }
 Status DBImpl::InstallCompactionResults(CompactionState* compact) {
   mutex_.AssertHeld();
-  Log(options_.info_log, "%d,Compacted %d@%d + %d@%d files => %lld bytes",
+  /*Log(options_.info_log, "%d,Compacted %d@%d + %d@%d files => %lld bytes",
       gettid(),compact->compaction->num_input_files(0), compact->compaction->level(),
+      compact->compaction->num_input_files(1), compact->compaction->level() + 1,
+      static_cast<long long>(compact->total_bytes));*/
+  Log(options_.info_log, "Compacted %d@%d + %d@%d files => %lld bytes",
+      compact->compaction->num_input_files(0), compact->compaction->level(),
       compact->compaction->num_input_files(1), compact->compaction->level() + 1,
       static_cast<long long>(compact->total_bytes));
 
@@ -1463,8 +1483,12 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
-  Log(options_.info_log, "%d,CompactingL0 %d@%d + %d@%d files",
+  /*Log(options_.info_log, "%d,CompactingL0 %d@%d + %d@%d files",
       gettid(),compact->compactionL0->num_input_filesL0(), compact->compactionL0->level(),
+      compact->compactionL0->num_input_filesL1(),
+      compact->compactionL0->level() + 1);*/
+  Log(options_.info_log, "CompactingL0 %d@%d + %d@%d files",
+      compact->compactionL0->num_input_filesL0(), compact->compactionL0->level(),
       compact->compactionL0->num_input_filesL1(),
       compact->compactionL0->level() + 1);
 
@@ -1677,7 +1701,8 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
     RecordBackgroundError(status);
   }
   VersionSet::LevelSummaryStorage tmp;
-  Log(options_.info_log, "%d,compacted toL0: %s", gettid(),versions_->LevelSummary(&tmp));
+  /*Log(options_.info_log, "%d,compacted toL0: %s", gettid(),versions_->LevelSummary(&tmp));*/
+  Log(options_.info_log, "compacted toL0: %s",versions_->LevelSummary(&tmp));
   return status;
 
 }
@@ -1685,8 +1710,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
-  Log(options_.info_log, "%d,Compacting %d@%d + %d@%d files",
+  /*Log(options_.info_log, "%d,Compacting %d@%d + %d@%d files",
       gettid(),compact->compaction->num_input_files(0), compact->compaction->level(),
+      compact->compaction->num_input_files(1),
+      compact->compaction->level() + 1);*/
+  Log(options_.info_log, "Compacting %d@%d + %d@%d files",
+      compact->compaction->num_input_files(0), compact->compaction->level(),
       compact->compaction->num_input_files(1),
       compact->compaction->level() + 1);
 
@@ -1838,7 +1867,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     RecordBackgroundError(status);
   }
   VersionSet::LevelSummaryStorage tmp;
-  Log(options_.info_log, "%d,compacted to: %s", gettid(),versions_->LevelSummary(&tmp));
+  /*Log(options_.info_log, "%d,compacted to: %s", gettid(),versions_->LevelSummary(&tmp));*/
+  Log(options_.info_log, "compacted to: %s", versions_->LevelSummary(&tmp));
   return status;
 }
 
