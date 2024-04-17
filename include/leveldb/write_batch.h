@@ -25,7 +25,6 @@
 
 #include "leveldb/export.h"
 #include "leveldb/status.h"
-#include "db/indexBtree.h"
 namespace leveldb {
 
 class Slice;

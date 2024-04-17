@@ -87,7 +87,7 @@ void PartitionIndexLayer::Add(SequenceNumber s, ValueType type, const Slice& key
       dbImpl_->background_work_finished_signal_.Wait();
     }
     const uint64_t cost = dbImpl_->env_->NowMicros() - start_micros;
-    if(cost>2000){
+    if(cost>=1000){
       Log(dbImpl_->options_.info_log,"L1 big wait %ld",cost);
     }
   }

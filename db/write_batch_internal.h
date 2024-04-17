@@ -7,7 +7,7 @@
 
 #include "db/dbformat.h"
 #include "leveldb/write_batch.h"
-
+#include "db/indexBtree.h"
 namespace leveldb {
 
 class MemTable;

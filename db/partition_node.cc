@@ -219,6 +219,11 @@ std::string & PartitionNode::get_start_key(){
 PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const Slice& key,
                                 const Slice& value,bool is_force,size_t capacity) {
 
+  /*if(immu_number_>=4){
+    dbImpl_->env_->SleepForMicroseconds(1000);
+  }else if(immu_number_>=2){
+    dbImpl_->env_->SleepForMicroseconds(200);
+  }*/
   bool ret=pmtable->Add(s,type,key,value);
   if(!ret){
     mutex_.Lock();
@@ -228,15 +233,17 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
     Log(dbImpl_->options_.info_log,"top_queue:%zu,high_queue:%zu,low_queue:%zu,thread:%d",top_queue_.capacity(),high_queue_.capacity(),low_queue_.capacity(),dbImpl_->background_compaction_scheduled_L0_);
     if(capacity<MIN_PARTITION){
       while(immu_number_>=3){
+        Log(dbImpl_->options_.info_log,"L0 immu wait reason:immu number>=3 and capacity small");
         background_work_finished_signal_L0_.Wait();
       }
     }
     while(immu_number_>=1&&extra_pm_log<=0){
+      Log(dbImpl_->options_.info_log,"L0 immu wait reason:immu number>=1 and extra_pm_log<=0");
       background_work_finished_signal_L0_.Wait();
     }
 
     const uint64_t cost = dbImpl_->env_->NowMicros() - start_micros;
-    if(cost>20000){
+    if(cost>1000){
       Log(dbImpl_->options_.info_log,"top_queue:%zu,high_queue:%zu,low_queue:%zu,thread:%d",top_queue_.capacity(),high_queue_.capacity(),low_queue_.capacity(),dbImpl_->background_compaction_scheduled_L0_);
       Log(dbImpl_->options_.info_log,"L0 immu wait %ld",cost);
     }
