@@ -73,7 +73,7 @@ bool PartitionIndexLayer::remove_partition_by_key(std::string &key){
 void PartitionIndexLayer::Add(SequenceNumber s, ValueType type, const Slice& key,
                    const Slice& value) {
 
-  {
+  /*{
     MutexLock l(&mutex_);
     const uint64_t start_micros = dbImpl_->env_->NowMicros();
     if (dbImpl_->versions_->NumLevelFiles(1)  >
@@ -90,7 +90,7 @@ void PartitionIndexLayer::Add(SequenceNumber s, ValueType type, const Slice& key
     if(cost>=1000){
       Log(dbImpl_->options_.info_log,"L1 big wait %ld",cost);
     }
-  }
+  }*/
 
 
     auto partition_node=seek_partition(key.ToString());

@@ -41,7 +41,7 @@ const uint64_t MAX_PARTITION=288;
 
 const bool IS_FLUSH=true;
 
-const uint64_t L0_THREAD_NUMBER=5;
+const uint64_t L0_THREAD_NUMBER=2;
 //const int extra_pm_log_const=20;
 //int extra_pm_log=extra_pm_log_const;
 
