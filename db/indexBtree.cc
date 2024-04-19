@@ -77,13 +77,13 @@ void PartitionIndexLayer::Add(SequenceNumber s, ValueType type, const Slice& key
     MutexLock l(&mutex_);
     const uint64_t start_micros = dbImpl_->env_->NowMicros();
     if (dbImpl_->versions_->NumLevelFiles(1)  >
-        PM_META_NODE_NUMBER *4 * 1.3) {
+        PM_META_NODE_NUMBER *4 * 2) {
       mutex_.Unlock();
       dbImpl_->env_->SleepForMicroseconds(1000);
       mutex_.Lock();
     }
     while(dbImpl_->versions_->NumLevelFiles(1) >
-        PM_META_NODE_NUMBER  *4* 1.5){
+        PM_META_NODE_NUMBER  *4* 3){
       dbImpl_->background_work_finished_signal_.Wait();
     }
     const uint64_t cost = dbImpl_->env_->NowMicros() - start_micros;
@@ -107,6 +107,7 @@ void PartitionIndexLayer::Add(SequenceNumber s, ValueType type, const Slice& key
       mutex_.Lock();
       PmLogHead *pmlog= nullptr;
       while((pmlog=nvmManager->get_pm_log())== nullptr){
+      Log(dbImpl_->options_.info_log,"no pm log");
       background_work_finished_signal_L0_.Wait();
       }
       PmTable *newPmTable=new PmTable(internal_comparator_,partition_node,pmlog);
@@ -255,9 +256,11 @@ PartitionNode::Status PartitionIndexLayer::split(PartitionNode *partitionNode){
           exit(2);
         }
         while((pmLogHead1=nvmManager->get_pm_log())== nullptr){
+          Log(dbImpl_->options_.info_log,"no pm log");
           background_work_finished_signal_L0_.Wait();
         }
         while((pmLogHead2=nvmManager->get_pm_log())== nullptr){
+          Log(dbImpl_->options_.info_log,"no pm log");
           background_work_finished_signal_L0_.Wait();
         }
 

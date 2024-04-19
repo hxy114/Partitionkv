@@ -195,7 +195,7 @@ DBImpl::~DBImpl() {
   if (owns_cache_) {
     delete options_.block_cache;
   }
-  std::cout<<extra_pm_log;
+  //std::cout<<extra_pm_log;
 }
 
 Status DBImpl::NewDB() {
@@ -1687,9 +1687,9 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
           tmp->status_=PmTable::IN_LOW_QUQUE;
         }
       }
-      extra_pm_log=extra_pm_log+imuu_list_size;
+      //extra_pm_log=extra_pm_log+imuu_list_size;
     }else{
-      extra_pm_log=extra_pm_log+imuu_list_size-1;
+      //extra_pm_log=extra_pm_log+imuu_list_size-1;
     }
 
 

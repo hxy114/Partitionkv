@@ -103,8 +103,8 @@ void PartitionNode::add_immuPmtable(PmTable *immuPmtable1){//增加一个
     immuPmtable1->status_=PmTable::IN_HEAD;
     metaNode->immu_pm_log=(uint64_t)immuPmtable->pmLogHead_-(uint64_t)base_;
   }else{
-    extra_pm_log--;
-    assert(extra_pm_log>=0);
+    //extra_pm_log--;
+    //assert(extra_pm_log>=0);
     auto tmp=immuPmtable;
     while(tmp->next_!= nullptr){
       tmp=tmp->next_;
@@ -231,7 +231,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
 
     const uint64_t start_micros = dbImpl_->env_->NowMicros();
     Log(dbImpl_->options_.info_log,"top_queue:%zu,high_queue:%zu,low_queue:%zu,thread:%d",top_queue_.capacity(),high_queue_.capacity(),low_queue_.capacity(),dbImpl_->background_compaction_scheduled_L0_);
-    if(capacity<MIN_PARTITION){
+    /*if(capacity<MIN_PARTITION&&other_immuPmtable!= nullptr){
       while(immu_number_>=3){
         Log(dbImpl_->options_.info_log,"L0 immu wait reason:immu number>=3 and capacity small");
         background_work_finished_signal_L0_.Wait();
@@ -246,7 +246,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
     if(cost>1000){
       Log(dbImpl_->options_.info_log,"top_queue:%zu,high_queue:%zu,low_queue:%zu,thread:%d",top_queue_.capacity(),high_queue_.capacity(),low_queue_.capacity(),dbImpl_->background_compaction_scheduled_L0_);
       Log(dbImpl_->options_.info_log,"L0 immu wait %ld",cost);
-    }
+    }*/
 
     add_immuPmtable(immupmTable);
     reset_pmtable();
@@ -268,6 +268,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
     if(is_force){
       PmLogHead *pmlog= nullptr;
       while((pmlog=nvmManager->get_pm_log())== nullptr){
+        Log(dbImpl_->options_.info_log,"no pm log");
         background_work_finished_signal_L0_.Wait();
       }
       PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
@@ -315,6 +316,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
               mutex_.Lock();
               PmLogHead *pmlog= nullptr;
               while((pmlog=nvmManager->get_pm_log())== nullptr){
+                Log(dbImpl_->options_.info_log,"no pm log");
                 background_work_finished_signal_L0_.Wait();
               }
               PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
@@ -336,6 +338,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
           mutex_.Lock();
           PmLogHead *pmlog= nullptr;
           while((pmlog=nvmManager->get_pm_log())== nullptr){
+            Log(dbImpl_->options_.info_log,"no pm log");
             background_work_finished_signal_L0_.Wait();
           }
           PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
