@@ -41,12 +41,16 @@ extern const uint64_t PRE_MERGE_NUMBER;//TODO
 
 
 extern const uint64_t MIN_PARTITION;
+extern const uint64_t AVG_PARTITION;
 extern const uint64_t MAX_PARTITION;
 
 
 extern const bool IS_FLUSH;
 
 extern const uint64_t L0_THREAD_NUMBER;
+
+extern const double NEW_SPLIT;
+extern const double NEW_MERGE;
 //extern int  extra_pm_log;
 //extern const int extra_pm_log_const;
 typedef struct MetaNode{//size=64B
@@ -82,6 +86,8 @@ class NvmManager {
   char *get_base();
   size_t get_free_pm_log_number();
   size_t get_free_meta_node_number();
+  uint64_t  L0_wait_;
+  uint64_t  L0_stop_;
  private:
   size_t pm_size_;//pm大小
 

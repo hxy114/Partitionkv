@@ -219,11 +219,10 @@ std::string & PartitionNode::get_start_key(){
 PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const Slice& key,
                                 const Slice& value,bool is_force,size_t capacity) {
 
-  /*if(immu_number_>=4){
+  if(immu_number_>=3){
+    Log(dbImpl_->options_.info_log,"immu_number long :%zu",immu_number_);
     dbImpl_->env_->SleepForMicroseconds(1000);
-  }else if(immu_number_>=2){
-    dbImpl_->env_->SleepForMicroseconds(200);
-  }*/
+  }
   bool ret=pmtable->Add(s,type,key,value);
   if(!ret){
     mutex_.Lock();
@@ -254,15 +253,15 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
     if(immupmTable->status_==PmTable::IN_HEAD){
       immupmTable->status_=PmTable::IN_LOW_QUQUE;
       low_queue_.InsertPmtable(immupmTable);
-    }else if(immuPmtable->status_==PmTable::IN_HIGH_QUEUE){
-      high_queue_.RemovePmtable(immuPmtable);
-      top_queue_.InsertPmtable(immuPmtable);
-      immuPmtable->status_=PmTable::IN_TOP_QUEUE;
     }else if(immuPmtable->status_==PmTable::IN_LOW_QUQUE){
+      low_queue_.RemovePmtable(immuPmtable);
+      high_queue_.InsertPmtable(immuPmtable);
+      immuPmtable->status_=PmTable::IN_HIGH_QUEUE;
+    }/*else if(immuPmtable->status_==PmTable::IN_LOW_QUQUE){
       low_queue_.RemovePmtable(immuPmtable);
       top_queue_.InsertPmtable(immuPmtable);
       immuPmtable->status_=PmTable::IN_TOP_QUEUE;
-    }
+    }*/
     dbImpl_->MaybeScheduleCompactionL0();
 
     if(is_force){
@@ -289,30 +288,54 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
       SequenceNumber max_snapshot = versions_->LastSequence(),min_snapshot=0;
       InternalKey start=InternalKey(start_key, max_snapshot, ValueType::kTypeValue) ;
       InternalKey end=InternalKey(end_key, min_snapshot, ValueType::kTypeValue) ;
-      auto size=current->GetOverlappingSize(1,&start,&end);
+      auto all_size=current->NumFiles(1);
+      auto cover_size=current->GetOverlappingSize(1,&start,&end);
 
       if(cover_.size()<K){
-          cover_.push_back(size);
+          cover_.push_back(cover_size);
       }else{
-          cover_[index_]=size;
+          cover_[index_]=cover_size;
           index_=(index_+1)%K;
       }
 
       if(!has_other_immupmtable){
-          if(capacity<MIN_PARTITION||size>=SPLIT){
-            status=split;
-            mutex_.Lock();
-            current->Unref();
-            mutex_.Unlock();
-            return status;
-          }else if(size<=MERGE){
-            status=merge;
+          if(all_size<560&&capacity<AVG_PARTITION){
+            if(capacity<MIN_PARTITION||cover_size>=SPLIT){
+              status=split;
+              mutex_.Lock();
+              current->Unref();
+              mutex_.Unlock();
+              return status;
+            }else if(cover_size<=MERGE){
+              status=merge;
+              mutex_.Lock();
+              current->Unref();
+              mutex_.Unlock();
+              return status;
+            }else{
+              if((status=needSplitOrMerge())==sucess){
+                mutex_.Lock();
+                PmLogHead *pmlog= nullptr;
+                while((pmlog=nvmManager->get_pm_log())== nullptr){
+                  Log(dbImpl_->options_.info_log,"no pm log");
+                  background_work_finished_signal_L0_.Wait();
+                }
+                PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
+
+                set_pmtable(newPmTable);
+                current->Unref();
+                mutex_.Unlock();
+                FLush();
+                pmtable->Add(s,type,key,value);
+                return sucess;
+              }
+            }
             mutex_.Lock();
             current->Unref();
             mutex_.Unlock();
             return status;
           }else{
-            if((status=needSplitOrMerge())==sucess){
+            if((status=needSplitOrMerge(all_size,cover_size))==sucess){
               mutex_.Lock();
               PmLogHead *pmlog= nullptr;
               while((pmlog=nvmManager->get_pm_log())== nullptr){
@@ -328,11 +351,14 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
               pmtable->Add(s,type,key,value);
               return sucess;
             }
-          }
+
           mutex_.Lock();
           current->Unref();
           mutex_.Unlock();
           return status;
+
+          }
+
 
       }else{
           mutex_.Lock();
@@ -354,7 +380,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
 
     }
   }
-  if(pmtable->ApproximateMemoryUsage()>PM_LOG_SIZE/2){
+  /*if(pmtable->ApproximateMemoryUsage()>PM_LOG_SIZE/2){
     mutex_.Lock();
     if(immuPmtable!= nullptr&&immuPmtable->GetPmTableStatus()==PmTable::PmTable_Status::IN_LOW_QUQUE){
       low_queue_.RemovePmtable(immuPmtable);
@@ -362,7 +388,7 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
       immuPmtable->SetPmTableStatus(PmTable::IN_HIGH_QUEUE);
     }
     mutex_.Unlock();
-  }
+  }*/
 
   return PartitionNode::Status::sucess;
 
@@ -390,6 +416,39 @@ PartitionNode::Status PartitionNode::needSplitOrMerge(){
     return status;
   }
   return status;
+}
+PartitionNode::Status PartitionNode::needSplitOrMerge(size_t  all_size,size_t cover_size){
+ /* Status status=sucess;
+  size_t split_number=0,merge_number=0;
+  for(int i=0;i<cover_.size();i++){
+    if(cover_[i]>=PRE_SPLIT){
+      split_number++;
+    }else if(cover_[i]<=PRE_MERGE){
+      merge_number++;
+    }
+  }
+  if(split_number>=PRE_SPLIT_NUMBER){
+    status=split;
+    return status;
+  }
+  if(merge_number>=PRE_MERGE_NUMBER){
+    status=merge;
+    return status;
+  }
+  return status;*/
+
+  double  cover_rate=cover_size*1.0/all_size;
+  if(cover_rate>=NEW_SPLIT){
+    return split;
+  }
+  if(cover_rate<=NEW_MERGE){
+    return merge;
+  }
+  return sucess;
+
+
+
+
 
 }
 

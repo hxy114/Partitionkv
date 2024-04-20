@@ -45,6 +45,7 @@ class PartitionNode{
  public:
   void reset_cover();
   Status needSplitOrMerge();
+  Status needSplitOrMerge(size_t all_size,size_t cover_size);
   void init(const std::string &startkey,const std::string &endkey);
   void FLush();
   PartitionNode(const std::string &start_key,

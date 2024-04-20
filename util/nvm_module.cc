@@ -12,7 +12,7 @@ const size_t PM_META_NODE_SIZE=64;//pmlog 大小
 const size_t PM_LOG_HEAD_SIZE=128;//pm log大小
 const size_t PM_LOG_SIZE=64*1024*1024UL;
 const size_t PERSIST_SIZE=4*1024*1024;//非强制刷写大小
-const size_t PM_META_NODE_NUMBER=190;//TODO
+const size_t PM_META_NODE_NUMBER=80;//TODO
 const size_t PM_LOG_NUMBER=288;//TODO
 //const size_t PM_LOG_NUMBER=200;//TODO
 const char * PM_FILE_NAME="/mnt/pmemdir/pm_log";
@@ -35,13 +35,17 @@ const uint64_t PRE_SPLIT_NUMBER=3;//TODO
 const uint64_t PRE_MERGE_NUMBER=3;//TODO
 
 
-const uint64_t MIN_PARTITION=25;
-const uint64_t MAX_PARTITION=288;
+const uint64_t MIN_PARTITION=20;
+const uint64_t AVG_PARTITION=40;
+const uint64_t MAX_PARTITION=80;
 
 
 const bool IS_FLUSH=true;
 
-const uint64_t L0_THREAD_NUMBER=2;
+const uint64_t L0_THREAD_NUMBER=5;
+
+const double NEW_SPLIT=1.0/80*2;
+const double NEW_MERGE=1.0/80/2;
 //const int extra_pm_log_const=20;
 //int extra_pm_log=extra_pm_log_const;
 
@@ -114,6 +118,8 @@ NvmManager::NvmManager (bool is_recover_){
       reset(pm_log_head);
       free_pm_log_list_.emplace_back(pm_log_head);
     }
+    L0_wait_=(free_pm_log_list_.size()-MAX_PARTITION)*0.3;
+    L0_stop_=0;
 
 
 

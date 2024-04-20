@@ -91,6 +91,10 @@ void PartitionIndexLayer::Add(SequenceNumber s, ValueType type, const Slice& key
       Log(dbImpl_->options_.info_log,"L1 big wait %ld",cost);
     }
   }*/
+  if(nvmManager->get_free_pm_log_number()<=nvmManager->L0_wait_){
+    Log(dbImpl_->options_.info_log,"L0 wait,free_pm_log");
+    dbImpl_->env_->SleepForMicroseconds(1000);
+  }
 
 
     auto partition_node=seek_partition(key.ToString());

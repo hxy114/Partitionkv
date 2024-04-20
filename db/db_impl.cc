@@ -1035,11 +1035,11 @@ bool DBImpl::BackgroundCompactionL0(){
       auto immupmtableptr = high->pmTable_;
       if (immupmtableptr->GetRole() == PmTable::other_immuPmtable ||
           !immupmtableptr->GetLeftFather()->has_other_immupmtable()) {
-        int n = 1;
+        int n = 1,k=2;
         auto tmp = immupmtableptr;
         std::string startey = immupmtableptr->GetMinKey(),
                     endkey = immupmtableptr->GetMaxKey();
-        while (tmp->next_) {
+        while (tmp->next_&&n<k) {
           tmp = tmp->next_;
           n++;
           if (startey.compare(tmp->GetMinKey()) > 0) {
@@ -1444,7 +1444,7 @@ Status DBImpl::InstallCompactionResultsL0(CompactionState* compact) {
       compact->compactionL0->num_input_filesL1(), compact->compactionL0->level() + 1,
       static_cast<long long>(compact->total_bytes));*/
   Log(options_.info_log, "Compacted %d@%d + %d@%d files => %lld bytes",
-      1, compact->compactionL0->level(),
+      compact->compactionL0->num_input_filesL0(), compact->compactionL0->level(),
       compact->compactionL0->num_input_filesL1(), compact->compactionL0->level() + 1,
       static_cast<long long>(compact->total_bytes));
 
