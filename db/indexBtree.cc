@@ -91,7 +91,7 @@ void PartitionIndexLayer::Add(SequenceNumber s, ValueType type, const Slice& key
       Log(dbImpl_->options_.info_log,"L1 big wait %ld",cost);
     }
   }*/
-  if(nvmManager->get_free_pm_log_number()<=nvmManager->L0_wait_){
+  if(nvmManager->get_free_pm_log_number()+dbImpl_->pmtableCache_.capacity()<=nvmManager->L0_wait_){
     Log(dbImpl_->options_.info_log,"L0 wait,free_pm_log");
     dbImpl_->env_->SleepForMicroseconds(1000);
   }
@@ -110,10 +110,11 @@ void PartitionIndexLayer::Add(SequenceNumber s, ValueType type, const Slice& key
     if(status==PartitionNode::noop){
       mutex_.Lock();
       PmLogHead *pmlog= nullptr;
-      while((pmlog=nvmManager->get_pm_log())== nullptr){
+      /*while((pmlog=nvmManager->get_pm_log())== nullptr){
       Log(dbImpl_->options_.info_log,"no pm log");
       background_work_finished_signal_L0_.Wait();
-      }
+      }*/
+      pmlog=dbImpl_->getPmlog();
       PmTable *newPmTable=new PmTable(internal_comparator_,partition_node,pmlog);
 
       partition_node->set_pmtable(newPmTable);
@@ -259,14 +260,16 @@ PartitionNode::Status PartitionIndexLayer::split(PartitionNode *partitionNode){
         if((newMetaNode=nvmManager->get_meta_node())== nullptr){
           exit(2);
         }
-        while((pmLogHead1=nvmManager->get_pm_log())== nullptr){
+        /*while((pmLogHead1=nvmManager->get_pm_log())== nullptr){
           Log(dbImpl_->options_.info_log,"no pm log");
           background_work_finished_signal_L0_.Wait();
         }
         while((pmLogHead2=nvmManager->get_pm_log())== nullptr){
           Log(dbImpl_->options_.info_log,"no pm log");
           background_work_finished_signal_L0_.Wait();
-        }
+        }*/
+        pmLogHead1=dbImpl_->getPmlog();
+        pmLogHead2=dbImpl_->getPmlog();
 
         PmTable *immutable_list=partitionNode->immuPmtable;
         PartitionNode *newPartitionNode=new PartitionNode(partitionNode->start_key,splitKey,newMetaNode,versions_,mutex_,background_work_finished_signal_L0_,internal_comparator_,top_queue_,high_queue_,low_queue_,dbImpl_);

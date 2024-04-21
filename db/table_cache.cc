@@ -10,7 +10,11 @@
 #include "util/coding.h"
 
 namespace leveldb {
-
+extern uint64_t  seek_file_time;
+extern uint64_t  seek_table_cache;
+extern uint64_t  seek_in_file_time;
+extern uint64_t  index_time;
+extern uint64_t  block_time;
 struct TableAndFile {
   RandomAccessFile* file;
   Table* table;
@@ -96,16 +100,21 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
   }
   return result;
 }
+uint64_t NowMicros();
 
 Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
                        uint64_t file_size, const Slice& k, void* arg,
                        void (*handle_result)(void*, const Slice&,
                                              const Slice&)) {
   Cache::Handle* handle = nullptr;
+  uint64_t  start=NowMicros();
   Status s = FindTable(file_number, file_size, &handle);
+  seek_table_cache+=NowMicros()-start;
   if (s.ok()) {
     Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    start=NowMicros();
     s = t->InternalGet(options, k, arg, handle_result);
+    seek_in_file_time+=NowMicros()-start;
     cache_->Release(handle);
   }
   return s;

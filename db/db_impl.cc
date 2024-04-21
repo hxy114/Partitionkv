@@ -40,7 +40,11 @@
 #include "util/mutexlock.h"
 #include "db/pmtable.h"
 namespace leveldb {
-
+uint64_t  seek_file_time=0;
+uint64_t  seek_table_cache=0;
+uint64_t  seek_in_file_time=0;
+uint64_t  index_time=0;
+uint64_t  block_time=0;
 const int kNumNonTableCacheFiles = 10;
 
 // Information kept for every waiting writer
@@ -162,8 +166,8 @@ DBImpl::DBImpl(const Options& raw_options, const std::string& dbname)
       manual_compaction_(nullptr),
       versions_(new VersionSet(dbname_, &options_, table_cache_,
                                &internal_comparator_)) ,
-      use_partition_(raw_options.use_partition_)
-      {}
+      use_partition_(raw_options.use_partition_),
+      pmtableCache_(){}
 
 DBImpl::~DBImpl() {
   // Wait for background work to finish.
@@ -177,6 +181,7 @@ DBImpl::~DBImpl() {
   }
   mutex_.Unlock();
 
+  Log(options_.info_log,"read_pm:%lu, read_disk_:%lu, miss_pm:%lu, match_pm:%lu, cache_size:%lu, seek_file_index:%lu, seek_table_cache:%lu, seek_in_table:%lu, index_time:%d, block_time:%d",read_pm_,read_disk_,miss_pm_,match_pm_,pmtableCache_.capacity(),seek_file_time,seek_table_cache,seek_in_file_time,index_time,block_time);
   if (db_lock_ != nullptr) {
     env_->UnlockFile(db_lock_);
   }
@@ -195,6 +200,7 @@ DBImpl::~DBImpl() {
   if (owns_cache_) {
     delete options_.block_cache;
   }
+
   //std::cout<<extra_pm_log;
 }
 
@@ -964,6 +970,8 @@ void AddBoundaryInputs(const InternalKeyComparator& icmp,
                        std::vector<FileMetaData*>* compaction_files);
 bool DBImpl::BackgroundCompactionL0(){
   mutex_.AssertHeld();
+  Log(options_.info_log,"seek immu top:%d,high:%d,low:%d,thread:%d",top_queue_.capacity(),high_queue_.capacity(),low_queue_.capacity(),background_compaction_scheduled_L0_);
+
   auto current=versions_->current();
   current->Ref();
   //Log(options_.info_log,"seek L0");
@@ -1652,6 +1660,7 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
     auto left_father=immu->GetLeftFather(),right_father=immu->GetRightFather();
     for(int i=0;i<imuu_list_size;i++){
       tmp->FreePmtable();
+      pmtableCache_.InsertPmtable(tmp);
       tmp->SetPmTableStatus(PmTable::IN_COMPACTIONED);
       tmp=tmp->next_;
     }
@@ -2005,8 +2014,11 @@ int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
   return versions_->MaxNextLevelOverlappingBytes();
 }
 bool DBImpl::Get(std::vector<PmTable*>&list,const LookupKey& key, std::string* value, Status* s){
+  bool is_exits=false;
   for(int i=list.size()-1;i>=0;i--){
-    if(list[i]->Get(key,value,s)){
+    is_exits=list[i]->comparator_.comparator.user_comparator()->Compare(key.user_key(),list[i]->GetMinKey())>=0&&
+               list[i]->comparator_.comparator.user_comparator()->Compare(key.user_key(),list[i]->GetMaxKey())<=0;
+    if(is_exits&&list[i]->Get(key,value,s)){
       return true;
     }
   }
@@ -2026,7 +2038,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     }
     PartitionNode *partitionNode=partitionIndexLayer_->seek_partition(key.ToString());
     PmTable *mem=partitionNode->pmtable,*imm=partitionNode->immuPmtable,*other=partitionNode->other_immuPmtable;
-    std::vector<PmTable*>immu_list,other_list;
+    std::vector<PmTable*>immu_list,other_list,cache_list;
 
     Version* current = versions_->current();
     if(mem){
@@ -2043,6 +2055,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
       other_list.push_back(other);
       other=other->next_;
     }
+    pmtableCache_.get_list(cache_list);
     current->Ref();
 
     bool have_stat_update = false;
@@ -2051,16 +2064,31 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     // Unlock while reading from files and memtables
     {
       mutex_.Unlock();
+      const uint64_t start_micros = env_->NowMicros();
       // First look in the memtable, then in the immutable memtable (if any).
       LookupKey lkey(key, snapshot);
       if (mem!= nullptr&&mem->Get(lkey, value, &s)) {
+        read_pm_=read_pm_+env_->NowMicros()-start_micros;
+        match_pm_++;
         // Done
       } else if (!other_list.empty() && Get(other_list,lkey, value, &s)) {
+        read_pm_=read_pm_+env_->NowMicros()-start_micros;
+        match_pm_++;
         // Done
       } else if(!immu_list.empty()  &&Get(immu_list,lkey,value,&s)){
+        read_pm_=read_pm_+env_->NowMicros()-start_micros;
+        match_pm_++;
         // Done
+      }else if(!cache_list.empty()&&Get(cache_list,lkey,value,&s)){
+        read_pm_=read_pm_+env_->NowMicros()-start_micros;
+        match_pm_++;
       }else {
+        const uint64_t  mid_micros=env_->NowMicros();
+        uint64_t
+        read_pm_=read_pm_+mid_micros-start_micros;
+        miss_pm_++;
         s = current->Get(options, lkey, value, &stats);
+        read_disk_=read_disk_+env_->NowMicros()-mid_micros;
         have_stat_update = true;
       }
       mutex_.Lock();
@@ -2643,6 +2671,19 @@ Status DestroyDB(const std::string& dbname, const Options& options) {
     env->RemoveDir(PM_FILE_NAME);
   }
   return result;
+}
+PmLogHead* DBImpl::getPmlog(){
+  mutex_.AssertHeld();
+  PmLogHead *p= nullptr;
+  if((p=nvmManager->get_pm_log())==nullptr){
+    while(!pmtableCache_.DeleteTopPmtable()){
+      Log(options_.info_log,"no pm log");
+      background_work_finished_signal_L0_.Wait();
+    }
+    p=nvmManager->get_pm_log();
+  }
+  assert(p!= nullptr);
+  return p;
 }
 
 }  // namespace leveldb

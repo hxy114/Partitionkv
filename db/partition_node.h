@@ -26,6 +26,7 @@ class PartitionNode{
   PmTable *immuPmtable;
   //std::atomic<bool> has_immuPmtable_;
   PmTable *other_immuPmtable;
+
   //std::atomic<bool> has_otherimmuPmtable_;
   MetaNode *metaNode;
   int refs_;
@@ -90,6 +91,7 @@ class PartitionNode{
       delete this;
     }
   }
+
    Status Add(SequenceNumber s, ValueType type, const Slice& key,
            const Slice& value,bool is_force,size_t  capacity);//当is_force=true时候，不进行split和merge
 };

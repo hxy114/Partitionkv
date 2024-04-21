@@ -75,7 +75,7 @@ class DBImpl : public DB {
   // Samples are taken approximately once every config::kReadBytesPeriod
   // bytes.
   void RecordReadSample(Slice key);
-
+  PmLogHead* getPmlog();
  private:
   friend class DB;
   struct CompactionState;
@@ -234,7 +234,11 @@ class DBImpl : public DB {
   std::vector<std::pair<std::string,std::string>>L0_range_ GUARDED_BY(mutex_);
   std::vector<std::pair<std::string,std::string>>L1_range_ GUARDED_BY(mutex_);
   std::vector<std::pair<std::string,std::string>>L2_range_ GUARDED_BY(mutex_);
-
+  PmtableCache pmtableCache_ GUARDED_BY(mutex_);
+  uint64_t  read_pm_=0;
+  uint64_t  read_disk_=0;
+  uint64_t  miss_pm_=0;
+  uint64_t  match_pm_=0;
 
 };
 

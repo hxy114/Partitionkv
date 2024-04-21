@@ -265,4 +265,56 @@ void PmtableQueue::RemovePmtable(PmTable *pmTable) {
 size_t PmtableQueue:: capacity(){
   return mp_.size();
 }
+PmtableCache::ListNode::ListNode(PmTable* pmTable){
+  pmTable_=pmTable;
+  pre= nullptr;
+  next= nullptr;
+}
+
+PmtableCache::PmtableCache() {
+  head_=new ListNode(nullptr);
+  head_->next=head_;
+  head_->pre=head_;
+  capacity_=0;
+}
+size_t PmtableCache::capacity(){
+  return capacity_;
+}
+void PmtableCache::InsertPmtable(PmTable *pmtable){
+  ListNode *pre=head_->pre;
+  pmtable->Ref();
+  ListNode *node=new ListNode(pmtable);
+  pre->next=node;
+  head_->pre=node;
+  node->pre=pre;
+  node->next=head_;
+  capacity_++;
+}
+bool PmtableCache::DeleteTopPmtable(){
+  if(capacity_>0){
+    ListNode *next=head_->next;
+    PmTable *p=next->pmTable_;
+    head_->next=next->next;
+    head_->next->pre=head_;
+
+    delete next;
+    capacity_--;
+    p->Unref();
+    return true;
+
+  }
+  return false;
+
+
+}
+void PmtableCache::get_list(std::vector<PmTable*>&cache_list){
+  cache_list.reserve(capacity_);
+  ListNode *tmp=head_->next;
+  while(tmp!=head_){
+
+    cache_list.emplace_back(tmp->pmTable_);
+    tmp=tmp->next;
+  }
+
+}
 }  // namespace leveldb

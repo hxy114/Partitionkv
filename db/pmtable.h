@@ -143,5 +143,26 @@ class PmtableQueue{
 
 
 };
+class PmtableCache{
+ public:
+  class ListNode {
+   public:
+    ListNode(PmTable* pmTable);
+    PmTable* pmTable_;
+    ListNode *pre, *next;
+  };
+  PmtableCache();
+  size_t capacity();
+  void InsertPmtable(PmTable *pmtable);
+  bool DeleteTopPmtable();
+  void get_list(std::vector<PmTable*>&cache_list);
+
+ private:
+  ListNode *head_;
+  size_t capacity_;
+
+
+};
+
 }  // namespace leveldb
 #endif  // LEVELDB_PMTABLE_H

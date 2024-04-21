@@ -216,6 +216,7 @@ std::string & PartitionNode::get_end_key(){
 std::string & PartitionNode::get_start_key(){
   return start_key;
 }
+
 PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const Slice& key,
                                 const Slice& value,bool is_force,size_t capacity) {
 
@@ -266,10 +267,12 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
 
     if(is_force){
       PmLogHead *pmlog= nullptr;
-      while((pmlog=nvmManager->get_pm_log())== nullptr){
+
+      /*while((pmlog=nvmManager->get_pm_log())== nullptr){
         Log(dbImpl_->options_.info_log,"no pm log");
         background_work_finished_signal_L0_.Wait();
-      }
+      }*/
+      pmlog=dbImpl_->getPmlog();
       PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
 
 
@@ -316,10 +319,11 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
               if((status=needSplitOrMerge())==sucess){
                 mutex_.Lock();
                 PmLogHead *pmlog= nullptr;
-                while((pmlog=nvmManager->get_pm_log())== nullptr){
+                /*while((pmlog=nvmManager->get_pm_log())== nullptr){
                   Log(dbImpl_->options_.info_log,"no pm log");
                   background_work_finished_signal_L0_.Wait();
-                }
+                }*/
+                pmlog=dbImpl_->getPmlog();
                 PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
 
                 set_pmtable(newPmTable);
@@ -338,10 +342,11 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
             if((status=needSplitOrMerge(all_size,cover_size))==sucess){
               mutex_.Lock();
               PmLogHead *pmlog= nullptr;
-              while((pmlog=nvmManager->get_pm_log())== nullptr){
+              /*while((pmlog=nvmManager->get_pm_log())== nullptr){
                 Log(dbImpl_->options_.info_log,"no pm log");
                 background_work_finished_signal_L0_.Wait();
-              }
+              }*/
+              pmlog=dbImpl_->getPmlog();
               PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
 
               set_pmtable(newPmTable);
@@ -363,10 +368,11 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
       }else{
           mutex_.Lock();
           PmLogHead *pmlog= nullptr;
-          while((pmlog=nvmManager->get_pm_log())== nullptr){
+          /*while((pmlog=nvmManager->get_pm_log())== nullptr){
             Log(dbImpl_->options_.info_log,"no pm log");
             background_work_finished_signal_L0_.Wait();
-          }
+          }*/
+          pmlog=dbImpl_->getPmlog();
           PmTable *newPmTable=new PmTable(internal_comparator_,this,pmlog);
 
           set_pmtable(newPmTable);

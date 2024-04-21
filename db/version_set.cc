@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <sys/time.h>
 
 #include "db/filename.h"
 #include "db/log_reader.h"
@@ -21,7 +22,9 @@
 #include "db/pmtable.h"
 
 namespace leveldb {
-
+extern uint64_t  seek_file_time;
+extern uint64_t  seek_table_cache;
+extern uint64_t  seek_in_file_time;
 static size_t TargetFileSize(const Options* options) {
   return options->max_file_size;
 }
@@ -54,7 +57,11 @@ static double MaxBytesForLevel(const Options* options, int level) {
 
 static uint64_t MaxFileSizeForLevel(const Options* options, int level) {
   // We could vary per level to reduce number of files?
-  return TargetFileSize(options);
+  uint64_t  size=TargetFileSize(options);
+  if(level>1){
+    size=size*4*level;
+  }
+  return size;
 }
 
 static int64_t TotalFileSize(const std::vector<FileMetaData*>& files) {
@@ -278,14 +285,19 @@ static void SaveValue(void* arg, const Slice& ikey, const Slice& v) {
 static bool NewestFirst(FileMetaData* a, FileMetaData* b) {
   return a->number > b->number;
 }
-
+uint64_t NowMicros()  {
+  static constexpr uint64_t kUsecondsPerSecond = 1000000;
+  struct ::timeval tv;
+  ::gettimeofday(&tv, nullptr);
+  return static_cast<uint64_t>(tv.tv_sec) * kUsecondsPerSecond + tv.tv_usec;
+}
 void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
                                  bool (*func)(void*, int, FileMetaData*)) {
   const Comparator* ucmp = vset_->icmp_.user_comparator();
 
   // Search level-0 in order from newest to oldest.
   std::vector<FileMetaData*> tmp;
-  tmp.reserve(files_[0].size());
+  /*tmp.reserve(files_[0].size());
   for (uint32_t i = 0; i < files_[0].size(); i++) {
     FileMetaData* f = files_[0][i];
     if (ucmp->Compare(user_key, f->smallest.user_key()) >= 0 &&
@@ -300,7 +312,7 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
         return;
       }
     }
-  }
+  }*/
 
   // Search other levels.
   for (int level = 1; level < config::kNumLevels; level++) {
@@ -308,7 +320,9 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
     if (num_files == 0) continue;
 
     // Binary search to find earliest index whose largest key >= internal_key.
+    uint64_t start=NowMicros();
     uint32_t index = FindFile(vset_->icmp_, files_[level], internal_key);
+    seek_file_time+=NowMicros()-start;
     if (index < num_files) {
       FileMetaData* f = files_[level][index];
       if (ucmp->Compare(user_key, f->smallest.user_key()) < 0) {
@@ -1436,15 +1450,24 @@ Compaction* VersionSet::PickCompaction() {
     assert(level + 1 < config::kNumLevels);
     c = new Compaction(options_, level);
 
+    int index=0;
+    if(!compact_pointer_[level].empty()){
+      index=FindFile(icmp_,current_->files_[level],compact_pointer_[level]);
+    }
+    int k=4;
+    for(int i=index;i<current_->files_[level].size()&&k>0;++i,--k){
+      FileMetaData* f = current_->files_[level][i];
+      c->inputs_[0].push_back(f);
+    }
     // Pick the first file that comes after compact_pointer_[level]
-    for (size_t i = 0; i < current_->files_[level].size(); i++) {
+    /*for (size_t i = 0; i < current_->files_[level].size(); i++) {
       FileMetaData* f = current_->files_[level][i];
       if (compact_pointer_[level].empty() ||
           icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
         c->inputs_[0].push_back(f);
         break;
       }
-    }
+    }*/
     if (c->inputs_[0].empty()) {
       // Wrap-around to the beginning of the key space
       c->inputs_[0].push_back(current_->files_[level][0]);

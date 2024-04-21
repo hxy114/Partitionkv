@@ -16,7 +16,12 @@
 #include "util/coding.h"
 
 namespace leveldb {
-
+extern uint64_t  seek_file_time;
+extern uint64_t  seek_table_cache;
+extern uint64_t  seek_in_file_time;
+extern uint64_t  index_time;
+extern uint64_t  block_time;
+uint64_t NowMicros();
 struct Table::Rep {
   ~Rep() {
     delete filter;
@@ -215,8 +220,10 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
                           void (*handle_result)(void*, const Slice&,
                                                 const Slice&)) {
   Status s;
+  uint64_t  start=NowMicros();
   Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
   iiter->Seek(k);
+  index_time+=NowMicros()-start;
   if (iiter->Valid()) {
     Slice handle_value = iiter->value();
     FilterBlockReader* filter = rep_->filter;
@@ -225,8 +232,10 @@ Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
         !filter->KeyMayMatch(handle.offset(), k)) {
       // Not found
     } else {
+      start=NowMicros();
       Iterator* block_iter = BlockReader(this, options, iiter->value());
       block_iter->Seek(k);
+      block_time+=NowMicros()-start;
       if (block_iter->Valid()) {
         (*handle_result)(arg, block_iter->key(), block_iter->value());
       }
