@@ -46,6 +46,8 @@ class PmTable;
 // REQUIRES: "files" contains a sorted list of non-overlapping files.
 int FindFile(const InternalKeyComparator& icmp,
              const std::vector<FileMetaData*>& files, const Slice& key);
+int FindFile(const Comparator& icmp,
+             const std::vector<FileMetaData*>& files, const Slice& key);
 
 // Returns true iff some file in "files" overlaps the user key range
 // [*smallest,*largest].
@@ -241,7 +243,7 @@ class VersionSet {
   // Returns nullptr if there is no compaction to be done.
   // Otherwise returns a pointer to a heap-allocated object that
   // describes the compaction.  Caller should delete the result.
-  Compaction* PickCompaction();
+  Compaction* PickCompaction(port::Mutex &mutex);
   CompactionL0* PickCompactionL0(PmTable *pmtable,std::vector<FileMetaData*>&input,int n,Slice &all_start,Slice &all_limit,Version *current);
   // Return a compaction object for compacting the range [begin,end] in
   // the specified level.  Returns nullptr if there is nothing in that

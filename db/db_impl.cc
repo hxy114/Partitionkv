@@ -254,7 +254,7 @@ void DBImpl::RemoveObsoleteFilesL0() {
   // Make a set of all of the live files
   std::set<uint64_t> live = pending_outputs_;
   versions_->AddLiveFiles(&live);
-
+  mutex_.Unlock();
   std::vector<std::string> filenames;
   env_->GetChildren(dbname_, &filenames);  // Ignoring errors on purpose
   uint64_t number;
@@ -304,7 +304,7 @@ void DBImpl::RemoveObsoleteFilesL0() {
   // While deleting all files unblock other threads. All files being deleted
   // have unique names which will not collide with newly created files and
   // are therefore safe to delete while allowing other threads to proceed.
-  mutex_.Unlock();
+  //mutex_.Unlock();
   for (const std::string& filename : files_to_delete) {
     env_->RemoveFile(dbname_ + "/" + filename);
   }
@@ -323,7 +323,7 @@ void DBImpl::RemoveObsoleteFiles() {
   // Make a set of all of the live files
   std::set<uint64_t> live = pending_outputs_;
   versions_->AddLiveFiles(&live);
-
+  mutex_.Unlock();
   std::vector<std::string> filenames;
   env_->GetChildren(dbname_, &filenames);  // Ignoring errors on purpose
   uint64_t number;
@@ -373,7 +373,7 @@ void DBImpl::RemoveObsoleteFiles() {
   // While deleting all files unblock other threads. All files being deleted
   // have unique names which will not collide with newly created files and
   // are therefore safe to delete while allowing other threads to proceed.
-  mutex_.Unlock();
+ // mutex_.Unlock();
   for (const std::string& filename : files_to_delete) {
     env_->RemoveFile(dbname_ + "/" + filename);
   }
@@ -964,6 +964,7 @@ void AddBoundaryInputs(const InternalKeyComparator& icmp,
                        std::vector<FileMetaData*>* compaction_files);
 bool DBImpl::BackgroundCompactionL0(){
   mutex_.AssertHeld();
+  Log(options_.info_log,"seek immu top:%d,high:%d,low:%d,thread:%d",top_queue_.capacity(),high_queue_.capacity(),low_queue_.capacity(),background_compaction_scheduled_L0_);
   auto current=versions_->current();
   current->Ref();
   //Log(options_.info_log,"seek L0");
@@ -1226,11 +1227,12 @@ void DBImpl::BackgroundCompaction() {
         (m->end ? m->end->DebugString().c_str() : "(end)"),
         (m->done ? "(end)" : manual_end.DebugString().c_str()));
   } else {
-    c = versions_->PickCompaction();
+    c = versions_->PickCompaction(mutex_);
   }
 
   Status status;
   if (c == nullptr) {
+    mutex_.Lock();
     // Nothing to do
   } else if (!is_manual && c->IsTrivialMove()) {
     // Move file to next level
@@ -2005,8 +2007,11 @@ int64_t DBImpl::TEST_MaxNextLevelOverlappingBytes() {
   return versions_->MaxNextLevelOverlappingBytes();
 }
 bool DBImpl::Get(std::vector<PmTable*>&list,const LookupKey& key, std::string* value, Status* s){
+  bool is_exits=false;
   for(int i=list.size()-1;i>=0;i--){
-    if(list[i]->Get(key,value,s)){
+    is_exits=list[i]->comparator_.comparator.user_comparator()->Compare(key.user_key(),list[i]->GetMinKey())>=0&&
+               list[i]->comparator_.comparator.user_comparator()->Compare(key.user_key(),list[i]->GetMaxKey())<=0;
+    if(is_exits&&list[i]->Get(key,value,s)){
       return true;
     }
   }

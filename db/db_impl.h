@@ -220,7 +220,7 @@ class DBImpl : public DB {
   int background_compaction_scheduled_L0_ GUARDED_BY(mutex_);
   ManualCompaction* manual_compaction_ GUARDED_BY(mutex_);
 
-  VersionSet* const versions_ GUARDED_BY(mutex_);
+  VersionSet* const versions_ ;
 
   // Have we encountered a background error in paranoid mode?
   Status bg_error_ GUARDED_BY(mutex_);

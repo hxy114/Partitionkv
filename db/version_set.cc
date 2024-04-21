@@ -54,7 +54,11 @@ static double MaxBytesForLevel(const Options* options, int level) {
 
 static uint64_t MaxFileSizeForLevel(const Options* options, int level) {
   // We could vary per level to reduce number of files?
-  return TargetFileSize(options);
+  uint64_t  size=TargetFileSize(options);
+  if(level>1){
+    size=size*4*(level-1);
+  }
+  return size;
 }
 
 static int64_t TotalFileSize(const std::vector<FileMetaData*>& files) {
@@ -84,7 +88,25 @@ Version::~Version() {
     }
   }
 }
-
+int FindFile(const Comparator& icmp,
+             const std::vector<FileMetaData*>& files, const Slice& key) {
+  uint32_t left = 0;
+  uint32_t right = files.size();
+  while (left < right) {
+    uint32_t mid = (left + right) / 2;
+    const FileMetaData* f = files[mid];
+    if (icmp.Compare(f->largest.Encode(), key) < 0) {
+      // Key at "mid.largest" is < "target".  Therefore all
+      // files at or before "mid" are uninteresting.
+      left = mid + 1;
+    } else {
+      // Key at "mid.largest" is >= "target".  Therefore all files
+      // after "mid" are uninteresting.
+      right = mid;
+    }
+  }
+  return right;
+}
 int FindFile(const InternalKeyComparator& icmp,
              const std::vector<FileMetaData*>& files, const Slice& key) {
   uint32_t left = 0;
@@ -573,18 +595,22 @@ void Version::GetOverlappingInputs(int level, const InternalKey* begin,
   if (end != nullptr) {
     user_end = end->user_key();
   }
+
+
   const Comparator* user_cmp = vset_->icmp_.user_comparator();
-  for (size_t i = 0; i < files_[level].size();) {
+  int index=FindFile(*user_cmp,files_[level],user_begin);
+  for (size_t i = index; i < files_[level].size();) {
     FileMetaData* f = files_[level][i++];
     const Slice file_start = f->smallest.user_key();
     const Slice file_limit = f->largest.user_key();
-    if (begin != nullptr && user_cmp->Compare(file_limit, user_begin) < 0) {
+    /*if (begin != nullptr && user_cmp->Compare(file_limit, user_begin) < 0) {
       // "f" is completely before specified range; skip it
-    } else if (end != nullptr && user_cmp->Compare(file_start, user_end) > 0) {
+    } else*/ if (end != nullptr && user_cmp->Compare(file_start, user_end) > 0) {
+      break;
       // "f" is completely after specified range; skip it
     } else {
       inputs->push_back(f);
-      if (level == 0) {
+      /*if (level == 0) {
         // Level-0 files may overlap each other.  So check if the newly
         // added file has expanded the range.  If so, restart search.
         if (begin != nullptr && user_cmp->Compare(file_start, user_begin) < 0) {
@@ -597,7 +623,7 @@ void Version::GetOverlappingInputs(int level, const InternalKey* begin,
           inputs->clear();
           i = 0;
         }
-      }
+      }*/
     }
   }
 }
@@ -615,17 +641,19 @@ void Version::GetOverlappingInputs(
   user_end = end;
 
   const Comparator* user_cmp = vset_->icmp_.user_comparator();
+  int index=FindFile(*user_cmp,files_[level],user_begin);
   for (size_t i = 0; i < files_[level].size();) {
     FileMetaData* f = files_[level][i++];
     const Slice file_start = f->smallest.user_key();
     const Slice file_limit = f->largest.user_key();
-    if ( user_cmp->Compare(file_limit, user_begin) < 0) {
+    /*if ( user_cmp->Compare(file_limit, user_begin) < 0) {
       // "f" is completely before specified range; skip it
-    } else if ( user_cmp->Compare(file_start, user_end) > 0) {
+    } else*/ if ( user_cmp->Compare(file_start, user_end) > 0) {
+      break;
       // "f" is completely after specified range; skip it
     } else {
       inputs->push_back(f);
-      if (level == 0) {
+      /*if (level == 0) {
         // Level-0 files may overlap each other.  So check if the newly
         // added file has expanded the range.  If so, restart search.
         if ( user_cmp->Compare(file_start, user_begin) < 0) {
@@ -638,7 +666,7 @@ void Version::GetOverlappingInputs(
           inputs->clear();
           i = 0;
         }
-      }
+      }*/
     }
   }
 
@@ -920,9 +948,26 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     }
   }
 
+
+
+  // Install the new version
+  if (s.ok()) {
+    AppendVersion(v);
+    log_number_ = edit->log_number_;
+    prev_log_number_ = edit->prev_log_number_;
+  } else {
+    delete v;
+    if (!new_manifest_file.empty()) {
+      delete descriptor_log_;
+      delete descriptor_file_;
+      descriptor_log_ = nullptr;
+      descriptor_file_ = nullptr;
+      env_->RemoveFile(new_manifest_file);
+    }
+  }
   // Unlock during expensive MANIFEST log write
   {
-    //mu->Unlock();
+    mu->Unlock();
 
     // Write new record to MANIFEST log
     if (s.ok()) {
@@ -943,23 +988,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
       s = SetCurrentFile(env_, dbname_, manifest_file_number_);
     }
 
-    //mu->Lock();
-  }
-
-  // Install the new version
-  if (s.ok()) {
-    AppendVersion(v);
-    log_number_ = edit->log_number_;
-    prev_log_number_ = edit->prev_log_number_;
-  } else {
-    delete v;
-    if (!new_manifest_file.empty()) {
-      delete descriptor_log_;
-      delete descriptor_file_;
-      descriptor_log_ = nullptr;
-      descriptor_file_ = nullptr;
-      env_->RemoveFile(new_manifest_file);
-    }
+    mu->Lock();
   }
 
   return s;
@@ -1409,7 +1438,7 @@ CompactionL0* VersionSet::PickCompactionL0(PmTable *pmtable,std::vector<FileMeta
   // (parent == level+1; grandparent == level+2)
 
   c->inputs_=std::move(input);
-  current_->GetOverlappingInputs(2, all_start.ToString(), all_limit.ToString(),
+  c->input_version_->GetOverlappingInputs(2, all_start.ToString(), all_limit.ToString(),
                                    &c->grandparents_);
 
 
@@ -1422,7 +1451,7 @@ CompactionL0* VersionSet::PickCompactionL0(PmTable *pmtable,std::vector<FileMeta
   return c;
 
 }
-Compaction* VersionSet::PickCompaction() {
+Compaction* VersionSet::PickCompaction(port::Mutex &mutex) {
   Compaction* c;
   int level;
 
@@ -1437,14 +1466,27 @@ Compaction* VersionSet::PickCompaction() {
     c = new Compaction(options_, level);
 
     // Pick the first file that comes after compact_pointer_[level]
-    for (size_t i = 0; i < current_->files_[level].size(); i++) {
+    int index=0;
+    if(!compact_pointer_[level].empty()){
+      index=FindFile(icmp_,current_->files_[level],compact_pointer_[level]);
+    }
+    int k=4;
+    for(int i=index;i<current_->files_[level].size()&&k>0;++i,--k){
+      FileMetaData* f = current_->files_[level][i];
+      c->inputs_[0].push_back(f);
+    }
+
+    /*for (size_t i = 0; i < current_->files_[level].size(); i++) {
       FileMetaData* f = current_->files_[level][i];
       if (compact_pointer_[level].empty() ||
           icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
         c->inputs_[0].push_back(f);
-        break;
+        if(c->inputs_[0].size()>4){
+          break;
+        }
+
       }
-    }
+    }*/
     if (c->inputs_[0].empty()) {
       // Wrap-around to the beginning of the key space
       c->inputs_[0].push_back(current_->files_[level][0]);
@@ -1459,9 +1501,9 @@ Compaction* VersionSet::PickCompaction() {
 
   c->input_version_ = current_;
   c->input_version_->Ref();
-
+  mutex.Unlock();
   // Files in level 0 may overlap each other, so pick up all overlapping ones
-  if (level == 0) {
+  /*if (level == 0) {
     InternalKey smallest, largest;
     GetRange(c->inputs_[0], &smallest, &largest);
     // Note that the next call will discard the file we placed in
@@ -1469,7 +1511,7 @@ Compaction* VersionSet::PickCompaction() {
     // which will include the picked file.
     current_->GetOverlappingInputs(0, &smallest, &largest, &c->inputs_[0]);
     assert(!c->inputs_[0].empty());
-  }
+  }*/
 
   SetupOtherInputs(c);
 
@@ -1484,13 +1526,14 @@ bool FindLargestKey(const InternalKeyComparator& icmp,
   if (files.empty()) {
     return false;
   }
-  *largest_key = files[0]->largest;
+  /**largest_key = files[0]->largest;
   for (size_t i = 1; i < files.size(); ++i) {
     FileMetaData* f = files[i];
     if (icmp.Compare(f->largest, *largest_key) > 0) {
       *largest_key = f->largest;
     }
-  }
+  }*/
+  *largest_key =files.back()->largest;
   return true;
 }
 
