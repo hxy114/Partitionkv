@@ -200,6 +200,12 @@ target_sources(leveldb
     "db/partition_node.cc"
     "db/pmtable.h"
     "db/pmtable.cc"
+    "db/vlog_writer.h"
+    "db/vlog_writer.cc"
+    "db/vlog_manager.h"
+    "db/vlog_manager.cc"
+    "db/vlog_fetcher.h"
+    "db/vlog_fetcher.cc"
   # Only CMake 3.3+ supports PUBLIC sources in targets exported by "install".
   $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
     "${LEVELDB_PUBLIC_INCLUDE_DIR}/c.h"

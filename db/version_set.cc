@@ -25,7 +25,9 @@ namespace leveldb {
 static size_t TargetFileSize(const Options* options) {
   return options->max_file_size;
 }
-
+static size_t TargetKVFileSize(const Options* options) {
+  return options->max_kv_file_size;
+}
 // Maximum bytes of overlaps in grandparent (i.e., level+2) before we
 // stop building a single file in a level->level+1 compaction.
 static int64_t MaxGrandParentOverlapBytes(const Options* options) {
@@ -44,7 +46,7 @@ static double MaxBytesForLevel(const Options* options, int level) {
   // the level-0 compaction threshold based on number of files.
 
   // Result for both level-0 and level-1
-  double result = 6. * 1048576.0*1024.0;
+  double result = 40. * 1048576.0;
   while (level > 1) {
     result *= 10;
     level--;
@@ -1776,6 +1778,7 @@ void Compaction::ReleaseInputs() {
 CompactionL0::CompactionL0(const Options* options)
     : level_(0),
       max_output_file_size_(MaxFileSizeForLevel(options, 0)),
+      max_kv_file_size_(TargetKVFileSize(options)),
       input_version_(nullptr),
       grandparent_index_(0),
       seen_key_(false),

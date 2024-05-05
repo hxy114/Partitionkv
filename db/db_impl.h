@@ -21,7 +21,7 @@
 #include "port/thread_annotations.h"
 #include "indexBtree.h"
 #include "util/nvm_module.h"
-
+#include "db/vlog_manager.h"
 namespace leveldb {
 
 class MemTable;
@@ -29,7 +29,6 @@ class TableCache;
 class Version;
 class VersionEdit;
 class VersionSet;
-
 class DBImpl : public DB {
  public:
   DBImpl(const Options& options, const std::string& dbname);
@@ -165,8 +164,10 @@ class DBImpl : public DB {
   Status DoCompactionWorkL0(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   Status OpenCompactionOutputFile(CompactionState* compact);
+  Status OpenCompactionVlog(CompactionState* compact);
   Status FinishCompactionOutputFile(CompactionState* compact, Iterator* input);
   Status FinishCompactionOutputFileL0(CompactionState* compact,Iterator* input);
+  Status FinishCompactionKVFile(CompactionState* compact,Iterator* input);
   Status InstallCompactionResults(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   Status InstallCompactionResultsL0(CompactionState* compact);
@@ -234,7 +235,7 @@ class DBImpl : public DB {
   std::vector<std::pair<std::string,std::string>>L0_range_ GUARDED_BY(mutex_);
   std::vector<std::pair<std::string,std::string>>L1_range_ GUARDED_BY(mutex_);
   std::vector<std::pair<std::string,std::string>>L2_range_ GUARDED_BY(mutex_);
-
+  vlog::VlogManager vlog_manager_;
 
 };
 

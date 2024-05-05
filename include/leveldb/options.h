@@ -85,7 +85,7 @@ struct LEVELDB_EXPORT Options {
   // Number of open files that can be used by the DB.  You may need to
   // increase this if your database has a large working set (budget
   // one open file per 2MB of working set).
-  int max_open_files = 5000;
+  int max_open_files = 10000;
 
   // Control over blocks (user data is stored in a set of blocks, and
   // a block is the unit of reading from disk).
@@ -113,7 +113,7 @@ struct LEVELDB_EXPORT Options {
   // compactions and hence longer latency/performance hiccups.
   // Another reason to increase this parameter might be when you are
   // initially populating a large database.
-  size_t max_file_size = 16 * 1024 * 1024;
+  size_t max_file_size = 1 * 1024 * 1024;
 
   // Compress blocks using the specified compression algorithm.  This
   // parameter can be changed dynamically.
@@ -146,6 +146,7 @@ struct LEVELDB_EXPORT Options {
   // NewBloomFilterPolicy() here.
   const FilterPolicy* filter_policy = nullptr;
   bool use_partition_=true;
+  size_t max_kv_file_size = 64 * 1024 * 1024;
 };
 
 // Options that control read operations

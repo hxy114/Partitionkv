@@ -71,14 +71,16 @@ struct DBImpl::CompactionState {
         outfile(nullptr),
         builder(nullptr),
         total_bytes(0),
-        compactionL0(nullptr){}
+        compactionL0(nullptr),
+        vWriter(nullptr){}
   explicit CompactionState(CompactionL0* c)
       : compaction(nullptr),
         smallest_snapshot(0),
         outfile(nullptr),
         builder(nullptr),
         total_bytes(0),
-        compactionL0(c){}
+        compactionL0(c),
+        vWriter(nullptr){}
 
   Compaction* const compaction;
   CompactionL0 *const compactionL0;
@@ -95,6 +97,8 @@ struct DBImpl::CompactionState {
   TableBuilder* builder;
 
   uint64_t total_bytes;
+  vlog::VWriter * vWriter;
+  uint64_t  vlog_number;
 };
 
 // Fix user-supplied options to be reasonable
@@ -264,10 +268,10 @@ void DBImpl::RemoveObsoleteFilesL0() {
     if (ParseFileName(filename, &number, &type)) {
       bool keep = true;
       switch (type) {
-        case kLogFile:
+        /*case kLogFile:
           keep = ((number >= versions_->LogNumber()) ||
                   (number == versions_->PrevLogNumber()));
-          break;
+          break;*/
         case kDescriptorFile:
           // Keep my manifest file, and any newer incarnations'
           // (in case there is a race that allows other incarnations)
@@ -333,10 +337,10 @@ void DBImpl::RemoveObsoleteFiles() {
     if (ParseFileName(filename, &number, &type)) {
       bool keep = true;
       switch (type) {
-        case kLogFile:
+        /*case kLogFile:
           keep = ((number >= versions_->LogNumber()) ||
                   (number == versions_->PrevLogNumber()));
-          break;
+          break;*/
         case kDescriptorFile:
           // Keep my manifest file, and any newer incarnations'
           // (in case there is a race that allows other incarnations)
@@ -1035,11 +1039,11 @@ bool DBImpl::BackgroundCompactionL0(){
       auto immupmtableptr = high->pmTable_;
       if (immupmtableptr->GetRole() == PmTable::other_immuPmtable ||
           !immupmtableptr->GetLeftFather()->has_other_immupmtable()) {
-        int n = 1,k=2;
+        int n = 1;
         auto tmp = immupmtableptr;
         std::string startey = immupmtableptr->GetMinKey(),
                     endkey = immupmtableptr->GetMaxKey();
-        while (tmp->next_&&n<k) {
+        while (tmp->next_) {
           tmp = tmp->next_;
           n++;
           if (startey.compare(tmp->GetMinKey()) > 0) {
@@ -1308,7 +1312,21 @@ void DBImpl::CleanupCompaction(CompactionState* compact) {
   }
   delete compact;
 }
+Status DBImpl::OpenCompactionVlog(CompactionState* compact) {
+  assert(compact != nullptr);
+  assert(compact->vWriter == nullptr);
+  uint64_t file_number;
+  {
+    mutex_.Lock();
+    file_number = versions_->NewFileNumber();
+    mutex_.Unlock();
+  }
+  auto vwrite=vlog_manager_.AddVlog(dbname_,options_,file_number);
+  compact->vlog_number=file_number;
+  compact->vWriter = vwrite;
 
+  return Status::OK();
+}
 Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
   assert(compact != nullptr);
   assert(compact->builder == nullptr);
@@ -1331,6 +1349,29 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
   if (s.ok()) {
     compact->builder = new TableBuilder(options_, compact->outfile);
   }
+  return s;
+}
+Status DBImpl::FinishCompactionKVFile(CompactionState* compact,
+                                      Iterator* input) {
+  assert(compact != nullptr);
+  assert(compact->vWriter != nullptr);
+
+
+
+
+  // Check for iterator errors
+  Status s = input->status();
+  if (s.ok()) {
+
+    const uint64_t current_bytes = compact->vWriter->FileSize();
+    compact->total_bytes += current_bytes;
+    compact->vWriter->Close();
+  } else {
+    exit(10);
+  }
+
+  compact->vWriter = nullptr;
+  compact->vlog_number=-1;
   return s;
 }
 Status DBImpl::FinishCompactionOutputFileL0(CompactionState* compact,
@@ -1575,16 +1616,51 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
           break;
         }
       }
+      if (compact->vWriter == nullptr) {
+        status = OpenCompactionVlog(compact);
+        if (!status.ok()) {
+          break;
+        }
+      }
       if (compact->builder->NumEntries() == 0) {
         compact->current_output()->smallest.DecodeFrom(key);
       }
       compact->current_output()->largest.DecodeFrom(key);
-      compact->builder->Add(key, input->value());
+      if(input->value().size()>200){
+        if(ikey.type==kTypeValue){
+          std::string rep;
+          rep.push_back(static_cast<char>(kTypeValue));
+          PutLengthPrefixedSlice(&rep, ikey.user_key);
+          PutLengthPrefixedSlice(&rep, input->value());
+          uint64_t addr= compact->vWriter->AddRecord(rep);
+          std::string address;
+          size_t size=rep.size();
+          assert(size==4116);
+          assert(addr%4116==0);
+          PutVarint64(&address, compact->vlog_number);
+          PutVarint64(&address, addr);
+          PutVarint64(&address, size);
+          compact->builder->Add(key,address);
+        }else{
+          compact->builder->Add(key, input->value());
+        }
+
+        //TODO kv分离
+      }else{
+        compact->builder->Add(key, input->value());
+      }
 
       // Close output file if it is big enough
       if (compact->builder->FileSize() >=
           compact->compactionL0->MaxOutputFileSize()) {
         status = FinishCompactionOutputFileL0(compact, input);
+        if (!status.ok()) {
+          break;
+        }
+      }
+      if (compact->vWriter->FileSize() >=
+          compact->compactionL0->MaxKVFileSize()) {
+        status = FinishCompactionKVFile(compact, input);
         if (!status.ok()) {
           break;
         }
@@ -1601,6 +1677,9 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
   if (status.ok() && compact->builder != nullptr) {
     status = FinishCompactionOutputFileL0(compact, input);
   }
+  if (status.ok() && compact->vWriter != nullptr) {
+    status = FinishCompactionKVFile(compact, input);
+  }
   if (status.ok()) {
     status = input->status();
   }
@@ -1614,10 +1693,11 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
     stats.bytes_read += compact->compactionL0->inputL1(i)->file_size;
   }
 
-  for (size_t i = 0; i < compact->outputs.size(); i++) {
+  /*for (size_t i = 0; i < compact->outputs.size(); i++) {
     stats.bytes_written += compact->outputs[i].file_size;
-  }
+  }*/
 
+  stats.bytes_written +=compact->total_bytes;
   mutex_.Lock();
   stats_[compact->compactionL0->level() + 1].Add(stats);
 
@@ -2050,6 +2130,7 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
 
     // Unlock while reading from files and memtables
     {
+      std::string midkey;
       mutex_.Unlock();
       // First look in the memtable, then in the immutable memtable (if any).
       LookupKey lkey(key, snapshot);
@@ -2060,7 +2141,11 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
       } else if(!immu_list.empty()  &&Get(immu_list,lkey,value,&s)){
         // Done
       }else {
-        s = current->Get(options, lkey, value, &stats);
+        s = current->Get(options, lkey, &midkey, &stats);
+        if(s.ok()){
+          //TODO 读另一个文件
+          vlog_manager_.FetchValueFromVlog(midkey,value);
+        }
         have_stat_update = true;
       }
       mutex_.Lock();

@@ -219,10 +219,10 @@ std::string & PartitionNode::get_start_key(){
 PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const Slice& key,
                                 const Slice& value,bool is_force,size_t capacity) {
 
-  if(immu_number_>=3){
+  /*if(immu_number_>=3){
     Log(dbImpl_->options_.info_log,"immu_number long :%zu",immu_number_);
     dbImpl_->env_->SleepForMicroseconds(1000);
-  }
+  }*/
   bool ret=pmtable->Add(s,type,key,value);
   if(!ret){
     mutex_.Lock();
@@ -300,13 +300,13 @@ PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const
 
       if(!has_other_immupmtable){
           if(all_size<560&&capacity<AVG_PARTITION){
-            if(capacity<MIN_PARTITION||cover_size>=SPLIT){
+            if(cover_size>=SPLIT){
               status=split;
               mutex_.Lock();
               current->Unref();
               mutex_.Unlock();
               return status;
-            }else if(cover_size<=MERGE){
+            }else if(capacity>MIN_PARTITION&&cover_size<=MERGE){
               status=merge;
               mutex_.Lock();
               current->Unref();

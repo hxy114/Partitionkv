@@ -110,7 +110,7 @@ static int FLAGS_block_size = 0;
 static int FLAGS_cache_size = 8 << 20;
 
 // Maximum number of files to keep open at the same time (use default if == 0)
-static int FLAGS_open_files = 0;
+static int FLAGS_open_files = 10000;
 
 // Bloom filter bits per key.
 // Negative means use default settings.

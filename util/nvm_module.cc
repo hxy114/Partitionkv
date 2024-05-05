@@ -24,11 +24,11 @@ const std::string MIN_KEY="";
 const std::string MAX_KEY="\xFF\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff";
 
 
-const uint64_t PRE_SPLIT=7;//TODO
-const uint64_t SPLIT=9;//TODO
+const uint64_t PRE_SPLIT=4;//TODO
+const uint64_t SPLIT=5;//TODO
 
-const uint64_t PRE_MERGE=3;//TODO
-const uint64_t MERGE=2;//TODO
+const uint64_t PRE_MERGE=1;//TODO
+const uint64_t MERGE=1;//TODO
 
 const uint64_t K=7;//TODO 记录K次覆盖记录
 const uint64_t PRE_SPLIT_NUMBER=3;//TODO

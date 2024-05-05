@@ -423,6 +423,7 @@ class CompactionL0 {
   std::string GetMinKey();
   // Maximum size of files to build during this compaction.
   uint64_t MaxOutputFileSize() const { return max_output_file_size_; }
+  uint64_t MaxKVFileSize() const { return max_kv_file_size_; }
 
   // Is this a trivial compaction that can be implemented by just
   // moving a single input file to the next level (no merging or splitting)
@@ -452,6 +453,7 @@ class CompactionL0 {
 
   int level_;
   uint64_t max_output_file_size_;
+  uint64_t  max_kv_file_size_;
   Version* input_version_;
   VersionEdit edit_;
 
