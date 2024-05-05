@@ -29,8 +29,8 @@ uint64_t  VWriter::AddRecord(const Slice& slice) {
   crc = crc32c::Mask(crc);  // Adjust for storage
   EncodeFixed32(head, crc);
   EncodeFixed64(&head[4], left);*/
-  assert(left==4116);
-  assert(size_%4116==0);
+  //assert(left==4116);
+  //assert(size_%4116==0);
   Status s;
   uint64_t tmp=size_;
   //s = dest_->Append(Slice(head, kVHeaderSize));

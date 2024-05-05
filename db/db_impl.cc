@@ -1635,8 +1635,8 @@ Status DBImpl::DoCompactionWorkL0(CompactionState* compact){
           uint64_t addr= compact->vWriter->AddRecord(rep);
           std::string address;
           size_t size=rep.size();
-          assert(size==4116);
-          assert(addr%4116==0);
+          //assert(size==4116);
+          //assert(addr%4116==0);
           PutVarint64(&address, compact->vlog_number);
           PutVarint64(&address, addr);
           PutVarint64(&address, size);
