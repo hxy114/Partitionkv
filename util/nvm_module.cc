@@ -6,14 +6,14 @@ namespace leveldb {
 NvmManager *nvmManager= nullptr;
 
 
-const size_t PM_SIZE=18*1024*1024*1024UL+200*1024*1024UL;
+const size_t PM_SIZE=8*1024*1024*1024UL+200*1024*1024UL;
 //const size_t PM_SIZE=14*1024*1024*1024UL;
 const size_t PM_META_NODE_SIZE=64;//pmlog 大小
 const size_t PM_LOG_HEAD_SIZE=128;//pm log大小
 const size_t PM_LOG_SIZE=64*1024*1024UL;
 const size_t PERSIST_SIZE=4*1024*1024;//非强制刷写大小
 const size_t PM_META_NODE_NUMBER=80;//TODO
-const size_t PM_LOG_NUMBER=288;//TODO
+const size_t PM_LOG_NUMBER=128;//TODO
 //const size_t PM_LOG_NUMBER=200;//TODO
 const char * PM_FILE_NAME="/mnt/pmemdir/pm_log";
 const uint32_t META_NODE_MAGIC=0x0100;
