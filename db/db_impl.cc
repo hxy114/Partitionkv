@@ -1035,11 +1035,11 @@ bool DBImpl::BackgroundCompactionL0(){
       auto immupmtableptr = high->pmTable_;
       if (immupmtableptr->GetRole() == PmTable::other_immuPmtable ||
           !immupmtableptr->GetLeftFather()->has_other_immupmtable()) {
-        int n = 1,k=2;
+        int n = 1;
         auto tmp = immupmtableptr;
         std::string startey = immupmtableptr->GetMinKey(),
                     endkey = immupmtableptr->GetMaxKey();
-        while (tmp->next_&&n<k) {
+        while (tmp->next_) {
           tmp = tmp->next_;
           n++;
           if (startey.compare(tmp->GetMinKey()) > 0) {

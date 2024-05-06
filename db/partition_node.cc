@@ -219,10 +219,10 @@ std::string & PartitionNode::get_start_key(){
 PartitionNode::Status PartitionNode::Add(SequenceNumber s, ValueType type, const Slice& key,
                                 const Slice& value,bool is_force,size_t capacity) {
 
-  if(immu_number_>=3){
+  /*if(immu_number_>=3){
     Log(dbImpl_->options_.info_log,"immu_number long :%zu",immu_number_);
     dbImpl_->env_->SleepForMicroseconds(1000);
-  }
+  }*/
   bool ret=pmtable->Add(s,type,key,value);
   if(!ret){
     mutex_.Lock();
