@@ -871,9 +871,9 @@ void PosixEnv::ScheduleL0(
   }
 
   // If the queue is empty, the background thread may be waiting for work.
-  if (background_work_queue_L0_.empty()) {
+  //if (background_work_queue_L0_.empty()) {
     background_work_cv_L0_.Signal();
-  }
+  //}
 
   background_work_queue_L0_.emplace(background_work_function, background_work_arg);
   background_work_mutex_L0_.Unlock();
