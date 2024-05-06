@@ -42,7 +42,7 @@ const uint64_t MAX_PARTITION=80;
 
 const bool IS_FLUSH=true;
 
-const uint64_t L0_THREAD_NUMBER=5;
+const uint64_t L0_THREAD_NUMBER=3;
 
 const double NEW_SPLIT=1.0/80*2;
 const double NEW_MERGE=1.0/80/2;
