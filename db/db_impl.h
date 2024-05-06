@@ -74,7 +74,7 @@ class DBImpl : public DB {
   // Samples are taken approximately once every config::kReadBytesPeriod
   // bytes.
   void RecordReadSample(Slice key);
-
+  vlog::VlogManager vlog_manager_;
  private:
   friend class DB;
   struct CompactionState;
@@ -235,7 +235,7 @@ class DBImpl : public DB {
   std::vector<std::pair<std::string,std::string>>L0_range_ GUARDED_BY(mutex_);
   std::vector<std::pair<std::string,std::string>>L1_range_ GUARDED_BY(mutex_);
   std::vector<std::pair<std::string,std::string>>L2_range_ GUARDED_BY(mutex_);
-  vlog::VlogManager vlog_manager_;
+
 
 };
 
