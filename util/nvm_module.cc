@@ -97,14 +97,30 @@ NvmManager::NvmManager (bool is_recover_){
   pm_log_base_=base_+PM_META_NODE_NUMBER*sizeof(MetaNode) ;
   if(is_recover_){
     //TODO recover
-    /*for(int i=0;i<PM_META_NODE_NUMBER;i++){
-      char *meta_node=base_+i*PM_META_NODE_SIZE;
-      if(strncmp(meta_node,META_NODE_MAGIC,4)==0){
+    for(int i=0;i<PM_META_NODE_NUMBER;i++){
+       auto *meta_node=(MetaNode*)(base_+i*sizeof(MetaNode));
+      if(meta_node->magic_number==META_NODE_MAGIC){
+        recover_meta_nodes_.emplace_back(i*sizeof(MetaNode),meta_node);
 
+      }else{
+        reset(meta_node);
+        free_meta_node_list_.emplace_back(meta_node);
       }
-      pmem_memcpy_persist(meta_node,"0000",4);
-      free_meta_node_list_.emplace_back(meta_node);
-    }*/
+
+    }
+    for(int i=0;i<PM_LOG_NUMBER;i++){
+      PmLogHead *pm_log_head=(PmLogHead*)(pm_log_base_+i*PM_LOG_SIZE);
+      if(pm_log_head->magic_number==PM_LOG_MAGIC){
+        recover_pm_log_list_.emplace_back(PM_META_NODE_NUMBER*sizeof(MetaNode)+i*PM_LOG_SIZE,pm_log_head);
+      }else{
+        reset(pm_log_head);
+        free_pm_log_list_.emplace_back(pm_log_head);
+      }
+
+    }
+    L0_wait_=(free_pm_log_list_.size()-MAX_PARTITION)*0.3;
+    L0_stop_=0;
+
 
 
   }else{
@@ -129,8 +145,11 @@ NvmManager::~NvmManager(){
   pmem_drain();
   pmem_unmap(base_,PM_SIZE);
 }
-std::vector<MetaNode *>&& NvmManager::get_recover_meta_nodes_(){
+std::vector<std::pair<uint64_t ,MetaNode *>>&& NvmManager::get_recover_meta_nodes_(){
   return std::move(recover_meta_nodes_);
+}
+std::vector<std::pair<uint64_t ,PmLogHead *>>&& NvmManager::get_recover_pm_log_nodes_(){
+  return std::move(recover_pm_log_list_);
 }
 char * NvmManager::get_base() {
   return base_;

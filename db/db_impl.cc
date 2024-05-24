@@ -379,6 +379,91 @@ void DBImpl::RemoveObsoleteFiles() {
   }
   mutex_.Lock();
 }
+void DBImpl::RecoverNVM(){
+  std::map<uint64_t ,PartitionNode*>partitionNodeMap;
+  std::map<uint64_t ,PmTable*>pmTableMap;
+  auto meta_nodes=nvmManager->get_recover_meta_nodes_();
+  auto pm_logs=nvmManager->get_recover_pm_log_nodes_();
+  for(auto & meta_node : meta_nodes){
+    PartitionNode * partition=new PartitionNode(meta_node.second,versions_,
+                  mutex_,background_work_finished_signal_L0_,internal_comparator_,
+                  top_queue_,
+                  high_queue_,
+                  low_queue_,
+                  this);
+    partitionNodeMap[meta_node.first]=partition;
+    partitionIndexLayer_->add_new_partition(partition);
+  }
+  auto iter=partitionIndexLayer_->get_bmap()->begin();
+  auto last=iter->second->end_key;
+  iter++;
+  while(iter!=partitionIndexLayer_->get_bmap()->end()){
+    assert(last==iter->second->start_key);
+    last=iter->second->end_key;
+    iter++;
+  }
+
+  for(auto & pm_log : pm_logs){
+    PmTable *pmTable=new PmTable(internal_comparator_,pm_log.second);
+    pmTableMap[pm_log.first]=pmTable;
+  }
+  for(auto &pmtable:pmTableMap){
+    if(pmtable.second->pmLogHead_->next!=0){
+      assert(pmTableMap.count(pmtable.second->pmLogHead_->next)!=0);
+      auto next=pmTableMap[pmtable.second->pmLogHead_->next];
+      pmtable.second->next_=next;
+    }
+  }
+  for(auto partitionnode:partitionNodeMap){
+    if(partitionnode.second->metaNode->pm_log!=0){
+      assert(pmTableMap.count(partitionnode.second->metaNode->pm_log)!=0);
+      partitionnode.second->set_pmtable(pmTableMap[partitionnode.second->metaNode->pm_log]);
+      pmTableMap[partitionnode.second->metaNode->pm_log]->SetRole(PmTable::pmtable);
+      pmTableMap[partitionnode.second->metaNode->pm_log]->SetLeftFather(partitionnode.second);
+      pmTableMap[partitionnode.second->metaNode->pm_log]->SetPmTableStatus(PmTable::IN_RECEVIE);
+      assert(partitionnode.second->pmtable->next_== nullptr);
+
+
+    }
+    if(partitionnode.second->metaNode->immu_pm_log!=0){
+      assert(pmTableMap.count(partitionnode.second->metaNode->immu_pm_log)!=0);
+      partitionnode.second->add_immuPmtable_list(pmTableMap[partitionnode.second->metaNode->immu_pm_log]);
+      pmTableMap[partitionnode.second->metaNode->immu_pm_log]->SetRole(PmTable::immuPmtable);
+      pmTableMap[partitionnode.second->metaNode->immu_pm_log]->SetLeftFather(partitionnode.second);
+      if(partitionnode.second->immu_number_==1){
+        partitionnode.second->immuPmtable->status_=PmTable::IN_LOW_QUQUE;
+        low_queue_.InsertPmtable(partitionnode.second->immuPmtable);
+      }else{
+        partitionnode.second->immuPmtable->status_=PmTable::IN_HIGH_QUEUE;
+        high_queue_.InsertPmtable(partitionnode.second->immuPmtable);
+      }
+
+
+    }
+    if(partitionnode.second->metaNode->other_immu_pm_log!=0){
+      assert(pmTableMap.count(partitionnode.second->metaNode->other_immu_pm_log)!=0);
+      partitionnode.second->set_other_immupmtable(pmTableMap[partitionnode.second->metaNode->other_immu_pm_log]);
+      pmTableMap[partitionnode.second->metaNode->other_immu_pm_log]->SetRole(PmTable::other_immuPmtable);
+      if(pmTableMap[partitionnode.second->metaNode->other_immu_pm_log]->GetLeftFather()== nullptr){
+        pmTableMap[partitionnode.second->metaNode->other_immu_pm_log]->SetLeftFather(partitionnode.second);
+      }else{
+        pmTableMap[partitionnode.second->metaNode->other_immu_pm_log]->SetRightFather(partitionnode.second);
+      }
+      partitionnode.second->other_immuPmtable->status_=PmTable::IN_TOP_QUEUE;
+      top_queue_.InsertPmtable(partitionnode.second->other_immuPmtable);
+
+
+    }
+
+
+
+  }
+  for(auto &pmtable:pmTableMap){
+    assert(pmtable.second->refs_!=0);
+  }
+
+
+}
 Status DBImpl::RecoverPartition(VersionEdit* edit, bool* save_manifest) {//TODO 恢复
   mutex_.AssertHeld();
 
@@ -409,6 +494,9 @@ Status DBImpl::RecoverPartition(VersionEdit* edit, bool* save_manifest) {//TODO 
     }
   } else {
     nvmManager=new NvmManager(true);
+    partitionIndexLayer_=new PartitionIndexLayer(versions_,mutex_,background_work_finished_signal_L0_,internal_comparator_,top_queue_,high_queue_,low_queue_, this);
+
+    RecoverNVM();
     if (options_.error_if_exists) {
       return Status::InvalidArgument(dbname_,
                                      "exists (error_if_exists is true)");

@@ -32,6 +32,26 @@ PmTable::PmTable(const InternalKeyComparator& comparator,PartitionNode *partitio
   assert(pmLogHead_!= nullptr);
   left_father_=partitionNode;
   init(partitionNode);}
+PmTable::PmTable(const InternalKeyComparator& comparator,PmLogHead* pmLogHead)
+    : comparator_(comparator), refs_(0),
+      pmLogHead_(pmLogHead),
+      nvmArena_(pmLogHead_, false,true),
+      table_(comparator_, &arena_),
+      left_father_(nullptr),right_father_(nullptr),next_(nullptr){
+  assert(pmLogHead_!= nullptr);
+  char *kv_buffer=(char*)pmLogHead_+PM_LOG_HEAD_SIZE;
+  while(kv_buffer<(char*)pmLogHead_+pmLogHead_->used_size){
+    add(kv_buffer);
+    uint64_t  totollen=0;
+    uint32_t  len=0;
+    GetVarint32Ptr(kv_buffer, kv_buffer + 5, &len);
+    totollen+=VarintLength(len)+len;
+    GetVarint32Ptr(kv_buffer+totollen, kv_buffer+totollen + 5, &len);
+    totollen+=VarintLength(len)+len;
+    kv_buffer+=totollen;
+  }
+  assert(kv_buffer==(char*)pmLogHead_+pmLogHead_->used_size);
+}
 void PmTable::init(PartitionNode *partitionNode){
   pmLogHead_->magic_number=PM_LOG_MAGIC;
   pmLogHead_->start_key_size=partitionNode->start_key.size();
@@ -151,6 +171,20 @@ std::string &PmTable::GetMinKey(){
 std::string &PmTable::GetMaxKey(){
   return max_key_;
 }
+
+void PmTable::add(char *buf) {
+  // Format of an entry is concatenation of:
+  //  key_size     : varint32 of internal_key.size()
+  //  key bytes    : char[internal_key.size()]
+  //  tag          : uint64((sequence << 8) | type)
+  //  value_size   : varint32 of value.size()
+  //  value bytes  : char[value.size()]
+
+    table_.Insert(buf);
+
+
+}
+
 bool PmTable::Add(SequenceNumber s, ValueType type, const Slice& key,
                    const Slice& value) {
   // Format of an entry is concatenation of:

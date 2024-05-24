@@ -35,6 +35,34 @@ PartitionNode::PartitionNode(const std::string &start_key1,
   init(start_key1,end_key1);
 }
 
+PartitionNode::PartitionNode(MetaNode *metaNode1,
+                             VersionSet * versions,
+                             port::Mutex &mutex,
+                             port::CondVar &background_work_finished_signal_L0,
+                             const InternalKeyComparator &internal_comparator,
+                             PmtableQueue &top_queue,
+                             PmtableQueue &high_queue,
+                             PmtableQueue &low_queue,
+
+                             DBImpl *dbImpl)
+    :versions_(versions),
+      mutex_(mutex),base_(nvmManager->get_base()),
+      metaNode(metaNode1),internal_comparator_(internal_comparator),
+      background_work_finished_signal_L0_(background_work_finished_signal_L0),
+      top_queue_(top_queue),
+      high_queue_(high_queue),
+      low_queue_(low_queue),
+      dbImpl_(dbImpl),
+      refs_(0),
+      immuPmtable(nullptr),
+      other_immuPmtable(nullptr),
+      pmtable(nullptr),
+      immu_number_(0){
+  start_key.assign(metaNode->start_key,metaNode->start_key_size);
+  end_key.assign(metaNode->end_key,metaNode->end_key_size);
+
+}
+
 PartitionNode::~PartitionNode(){
   pmem_persist(metaNode,sizeof(MetaNode));
   nvmManager->free_meta_node(metaNode);
@@ -60,7 +88,7 @@ void PartitionNode::init(const std::string &startkey,const std::string &endkey){
   metaNode->start_key_size=start_key.size();
   pmem_memcpy_nodrain(&metaNode->start_key,startkey.c_str(),startkey.size());
   metaNode->end_key_size=end_key.size();
-  pmem_memcpy_nodrain(&metaNode->start_key,endkey.c_str(),endkey.size());
+  pmem_memcpy_nodrain(&metaNode->end_key,endkey.c_str(),endkey.size());
   metaNode->magic_number=META_NODE_MAGIC;
   //pmem_drain();
 }
@@ -72,7 +100,7 @@ void PartitionNode::set_range(std::string &startkey,std::string &endkey){
   metaNode->start_key_size=start_key.size();
   pmem_memcpy_nodrain(&metaNode->start_key,startkey.c_str(),startkey.size());
   metaNode->end_key_size=end_key.size();
-  pmem_memcpy_nodrain(&metaNode->start_key,endkey.c_str(),endkey.size());
+  pmem_memcpy_nodrain(&metaNode->end_key,endkey.c_str(),endkey.size());
   //pmem_drain();
 }
 void PartitionNode::set_other_immupmtable(PmTable *otherImmuPmtable1){//增加一堆
@@ -113,6 +141,34 @@ void PartitionNode::add_immuPmtable(PmTable *immuPmtable1){//增加一个
     immuPmtable1->status_=PmTable::IN_FOLLOW;
   }
   immu_number_++;
+  //pmem_drain();
+
+}
+void PartitionNode::add_immuPmtable_list(PmTable *immuPmtable1){//增加一个
+  //assert(immuPmtable== nullptr&&immuPmtable1!= nullptr);
+  immuPmtable1->Ref();
+  if(immuPmtable== nullptr){
+    immuPmtable=immuPmtable1;
+    immuPmtable1->status_=PmTable::IN_HEAD;
+    metaNode->immu_pm_log=(uint64_t)immuPmtable->pmLogHead_-(uint64_t)base_;
+  }else{
+    //extra_pm_log--;
+    //assert(extra_pm_log>=0);
+    auto tmp=immuPmtable;
+    while(tmp->next_!= nullptr){
+      tmp=tmp->next_;
+    }
+    tmp->SetNext(immuPmtable1);
+    immuPmtable1->status_=PmTable::IN_FOLLOW;
+  }
+  immu_number_++;
+  immuPmtable1=immuPmtable1->next_;
+  while(immuPmtable1!= nullptr){
+    immuPmtable1->Ref();
+    immuPmtable1->status_=PmTable::IN_FOLLOW;
+    immuPmtable1=immuPmtable1->next_;
+    immu_number_++;
+  }
   //pmem_drain();
 
 }

@@ -40,6 +40,7 @@ class PmTable {
   // MemTables are reference counted.  The initial reference count
   // is zero and the caller must call Ref() at least once.
   explicit PmTable(const InternalKeyComparator& comparator,PartitionNode *partitionNode,PmLogHead *pmLogHead);
+  explicit PmTable(const InternalKeyComparator& comparator,PmLogHead *pmLogHead);
   void init(PartitionNode *partitionNode);
   PmTable(const PmTable&) = delete;
   PmTable& operator=(const PmTable&) = delete;
@@ -73,6 +74,7 @@ class PmTable {
   // Typically value will be empty if type==kTypeDeletion.
   bool Add(SequenceNumber seq, ValueType type, const Slice& key,
            const Slice& value);
+  void add(char *buffer);
   std::string &GetMinKey();
   std::string &GetMaxKey();
   // If memtable contains a value for key, store it in *value and return true.

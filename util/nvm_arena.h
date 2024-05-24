@@ -16,7 +16,7 @@ namespace  leveldb{
 
 class NvmArena {
  public:
-  NvmArena(PmLogHead *pm_log_head,bool force=false);
+  NvmArena(PmLogHead *pm_log_head,bool force=false,bool recover=false);
 
   NvmArena(const NvmArena&) = delete;
   NvmArena& operator=(const NvmArena&) = delete;

@@ -82,7 +82,8 @@ class NvmManager {
   PmLogHead * get_pm_log();
   void free_meta_node(MetaNode * meta_node);
   void free_pm_log(PmLogHead * pm_log);
-  std::vector<MetaNode *>&& get_recover_meta_nodes_();
+  std::vector<std::pair<uint64_t ,MetaNode *>>&& get_recover_meta_nodes_();
+  std::vector<std::pair<uint64_t ,PmLogHead *>>&& get_recover_pm_log_nodes_();
   char *get_base();
   size_t get_free_pm_log_number();
   size_t get_free_meta_node_number();
@@ -98,7 +99,9 @@ class NvmManager {
 
   std::vector<MetaNode *>free_meta_node_list_;
   std::vector<PmLogHead *>free_pm_log_list_;
-  std::vector<MetaNode *>recover_meta_nodes_;
+
+  std::vector<std::pair<uint64_t ,MetaNode *>>recover_meta_nodes_;
+  std::vector<std::pair<uint64_t ,PmLogHead *>>recover_pm_log_list_;
 
 };
 void reset(MetaNode *meta_node);

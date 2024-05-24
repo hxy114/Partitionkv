@@ -7,9 +7,17 @@ namespace leveldb {
 
 static const int kBlockSize = 4096;
 
-NvmArena::NvmArena(PmLogHead *pm_log_start,bool force)
+NvmArena::NvmArena(PmLogHead *pm_log_start,bool force,bool recover)
     : pm_log_start_(pm_log_start), force_(force), memory_usage_(PM_LOG_HEAD_SIZE),
-      kv_start_((char*)pm_log_start_+PM_LOG_HEAD_SIZE ),kv_alloc_ptr_(kv_start_),last_persist_point_(kv_start_){}
+      kv_start_((char*)pm_log_start_+PM_LOG_HEAD_SIZE ),kv_alloc_ptr_(kv_start_),last_persist_point_(kv_start_){
+      if(recover){
+        memory_usage_=pm_log_start_->used_size;
+        kv_alloc_ptr_=(char*)pm_log_start_+memory_usage_;
+        last_persist_point_=kv_alloc_ptr_;
+      }
+
+
+}
 
 NvmArena::~NvmArena() {
   //TODO maybe归还pmlog

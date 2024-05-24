@@ -58,6 +58,14 @@ class PartitionNode{
                 PmtableQueue &high_queue,
                 PmtableQueue &low_queue,
                 DBImpl *dbImpl);
+  PartitionNode(MetaNode *metaNode1,VersionSet *versions,
+                port::Mutex &mutex,
+                port::CondVar &background_work_finished_signal,
+                const InternalKeyComparator &internal_comparator,
+                PmtableQueue &top_queue,
+                PmtableQueue &high_queue,
+                PmtableQueue &low_queue,
+                DBImpl *dbImpl);
   ~PartitionNode();
   void FreePartitionNode();//更改metanode头，并且持久化
   //设置该partition_node的key range
@@ -65,6 +73,7 @@ class PartitionNode{
   //设置指针
   void set_other_immupmtable(PmTable *otherImmuPmtable);
   void add_immuPmtable(PmTable *immuPmtable);
+  void add_immuPmtable_list(PmTable *immuPmtable);
   void set_immuPmtable(PmTable *immuPmtable1);
   void set_pmtable(PmTable *pmTable);
   void reset_other_immupmtable(int n,PmTable *pm);
